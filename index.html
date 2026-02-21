@@ -140,9 +140,8 @@ function playBeep(type){try{const ctx=new(window.AudioContext||window.webkitAudi
 async function persistSave(rmt, payload) {
   try {
     const url = `${SCRIPT_URL}?action=save&rmt=${encodeURIComponent(rmt)}&payload=${encodeURIComponent(JSON.stringify(payload))}`;
-    const res = await fetch(url);
-    const json = await res.json();
-    return json.success === true;
+    await fetch(url, { mode: "no-cors" });
+    return true;
   } catch(e) {
     return false;
   }
