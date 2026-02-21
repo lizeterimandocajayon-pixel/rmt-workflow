@@ -137,32 +137,37 @@ const USEFUL_LINKS = [
 
 function playBeep(type){try{const ctx=new(window.AudioContext||window.webkitAudioContext)();const freqs=type==="followup2"?[880,660,880]:[660,880];freqs.forEach((freq,i)=>{const osc=ctx.createOscillator(),gain=ctx.createGain();osc.connect(gain);gain.connect(ctx.destination);osc.frequency.value=freq;osc.type="sine";gain.gain.setValueAtTime(0.3,ctx.currentTime+i*0.2);gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+i*0.2+0.3);osc.start(ctx.currentTime+i*0.2);osc.stop(ctx.currentTime+i*0.2+0.3);});}catch(e){}}
 
-// ── Persistent storage helpers ──────────────────────────────────────────────
-const STORAGE_KEY = rmt => `rmt-workflow:${rmt.toLowerCase().trim()}`;
+// Save to Google Sheets
+async function sheetSync(rmt, payload) {
+  try {
+    const url = `${SCRIPT_URL}?rmt=${encodeURIComponent(rmt)}&action=save&payload=${encodeURIComponent(JSON.stringify(payload))}`;
+    await fetch(url, { method: "GET", mode: "no-cors" });
+  } catch(e) {}
+}
 
 async function persistSave(rmt, payload) {
   try {
-    await window.storage.set(STORAGE_KEY(rmt), JSON.stringify(payload));
+    await window.storage.set(`rmt-workflow:${rmt.toLowerCase().trim()}`, JSON.stringify(payload));
+    sheetSync(rmt, payload); // fire and forget
     return true;
   } catch(e) {
-    console.warn("Storage save failed:", e);
     return false;
   }
 }
 
 async function persistLoad(rmt) {
+  // Try local storage first
   try {
-    const result = await window.storage.get(STORAGE_KEY(rmt));
+    const result = await window.storage.get(`rmt-workflow:${rmt.toLowerCase().trim()}`);
     if (result && result.value) return JSON.parse(result.value);
-  } catch(e) {
-    // Key doesn't exist yet or parse error — that's fine for first-time users
-  }
+  } catch(e) {}
+  // Fall back to Google Sheets
+  try {
+    const res = await fetch(`${SCRIPT_URL}?rmt=${encodeURIComponent(rmt)}`);
+    const json = await res.json();
+    if (json.success && json.data) return json.data;
+  } catch(e) {}
   return null;
-}
-
-// Also sync to Google Sheets in background (best-effort)
-async function sheetSync(rmt, payload) {
-  try { await fetch(SCRIPT_URL, {method:"POST", body:JSON.stringify({action:"save", rmt, payload})}); } catch(e) {}
 }
 
 // ────────────────────────────────────────────────────────────────────────────
