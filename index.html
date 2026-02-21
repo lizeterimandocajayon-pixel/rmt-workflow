@@ -140,32 +140,32 @@ function playBeep(type){try{const ctx=new(window.AudioContext||window.webkitAudi
 async function persistSave(rmt, payload) {
   const key = `rmt-workflow:${rmt.toLowerCase().trim()}`;
   const str = JSON.stringify(payload);
-  // Always save to localStorage immediately
-  try { localStorage.setItem(key, str); } catch(e) {}
-  // Also save to Google Sheets
+  // Save to localStorage — this is the primary save, always works
   try {
-    const url = `${SCRIPT_URL}?action=save&rmt=${encodeURIComponent(rmt)}&payload=${encodeURIComponent(str)}`;
-    const res = await fetch(url);
-    const json = await res.json();
-    return json.success === true;
+    localStorage.setItem(key, str);
   } catch(e) {
     return false;
   }
+  // Silent background sync to Google Sheets (no-cors, fire and forget)
+  try {
+    const url = `${SCRIPT_URL}?action=save&rmt=${encodeURIComponent(rmt)}&payload=${encodeURIComponent(str)}`;
+    fetch(url, { mode: "no-cors" }).catch(() => {});
+  } catch(e) {}
+  return true;
 }
 
 async function persistLoad(rmt) {
   const key = `rmt-workflow:${rmt.toLowerCase().trim()}`;
-  // Try Google Sheets first (so data works across browsers/devices)
+  // Try Google Sheets first (cross-device support)
   try {
     const res = await fetch(`${SCRIPT_URL}?rmt=${encodeURIComponent(rmt)}`);
     const json = await res.json();
     if (json.success && json.data) {
-      // Also update localStorage with latest from Sheets
       localStorage.setItem(key, JSON.stringify(json.data));
       return json.data;
     }
   } catch(e) {}
-  // Fall back to localStorage if Sheets unreachable
+  // Fall back to localStorage
   try {
     const local = localStorage.getItem(key);
     if (local) return JSON.parse(local);
