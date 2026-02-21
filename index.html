@@ -20,7 +20,7 @@
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const SCRIPT_URL = "https://script.google.com/a/macros/wondersco.com/s/AKfycbxwxcjwasOZdIFR_tWs3t3YT_a8d6VN5Bt7frQJxYHCHhEpaTzheBpWoriGs4STgT8O/exec";
+const SCRIPT_URL = "https://script.google.com/a/macros/wondersco.com/s/AKfycbwbYAl2BAZNFwJEPicpeSm0KD_RhFSLwDYOUauOx1upYSbwnjIGEA5FTIMihZy26UYw/exec";
 const { useState, useEffect, useCallback, useRef } = React;
 
 const E_LEVELS = {
@@ -138,13 +138,16 @@ const USEFUL_LINKS = [
 function playBeep(type){try{const ctx=new(window.AudioContext||window.webkitAudioContext)();const freqs=type==="followup2"?[880,660,880]:[660,880];freqs.forEach((freq,i)=>{const osc=ctx.createOscillator(),gain=ctx.createGain();osc.connect(gain);gain.connect(ctx.destination);osc.frequency.value=freq;osc.type="sine";gain.gain.setValueAtTime(0.3,ctx.currentTime+i*0.2);gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+i*0.2+0.3);osc.start(ctx.currentTime+i*0.2);osc.stop(ctx.currentTime+i*0.2+0.3);});}catch(e){}}
 
 async function persistSave(rmt, payload) {
+  const key = `rmt-workflow:${rmt.toLowerCase().trim()}`;
+  const str = JSON.stringify(payload);
+  // Always save to localStorage immediately
+  try { localStorage.setItem(key, str); } catch(e) {}
+  // Also save to Google Sheets
   try {
-    const key = `rmt-workflow:${rmt.toLowerCase().trim()}`;
-    localStorage.setItem(key, JSON.stringify(payload));
-    // Also try to sync to Google Sheets in background
-    const url = `${SCRIPT_URL}?action=save&rmt=${encodeURIComponent(rmt)}&payload=${encodeURIComponent(JSON.stringify(payload))}`;
-    fetch(url, { mode: "no-cors" }).catch(() => {});
-    return true;
+    const url = `${SCRIPT_URL}?action=save&rmt=${encodeURIComponent(rmt)}&payload=${encodeURIComponent(str)}`;
+    const res = await fetch(url);
+    const json = await res.json();
+    return json.success === true;
   } catch(e) {
     return false;
   }
@@ -152,16 +155,20 @@ async function persistSave(rmt, payload) {
 
 async function persistLoad(rmt) {
   const key = `rmt-workflow:${rmt.toLowerCase().trim()}`;
-  // Try localStorage first (works on Vercel, instant)
-  try {
-    const local = localStorage.getItem(key);
-    if (local) return JSON.parse(local);
-  } catch(e) {}
-  // Fall back to Google Sheets
+  // Try Google Sheets first (so data works across browsers/devices)
   try {
     const res = await fetch(`${SCRIPT_URL}?rmt=${encodeURIComponent(rmt)}`);
     const json = await res.json();
-    if (json.success && json.data) return json.data;
+    if (json.success && json.data) {
+      // Also update localStorage with latest from Sheets
+      localStorage.setItem(key, JSON.stringify(json.data));
+      return json.data;
+    }
+  } catch(e) {}
+  // Fall back to localStorage if Sheets unreachable
+  try {
+    const local = localStorage.getItem(key);
+    if (local) return JSON.parse(local);
   } catch(e) {}
   return null;
 }
