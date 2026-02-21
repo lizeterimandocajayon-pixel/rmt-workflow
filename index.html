@@ -10,683 +10,653 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Inter', sans-serif; background: #F1F5F9; min-height: 100vh; }
-    input, select, button { font-family: inherit; }
+    input, select, button, textarea { font-family: inherit; }
     pre { font-family: inherit; }
     @keyframes slideIn { from { transform: translateX(110%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-    @keyframes slideOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(110%); opacity: 0; } }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+    @keyframes popIn { from { transform: scale(0.94); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-  <div id="root"></div>
-  <script type="text/babel">
-    const SCRIPT_URL = "https://script.google.com/a/macros/wondersco.com/s/AKfycbzzz91SHEsarseB5IdBHbX0sFeWf1fxgtWS9jiFX739Dhb48omLVWfXsqyGQPcHvyfpjQ/exec";
-    const { useState, useEffect, useCallback, useRef } = React;
+<div id="root"></div>
+<script type="text/babel">
+const SCRIPT_URL = "https://script.google.com/a/macros/wondersco.com/s/AKfycbwGvpHb_STVCkiawxJxgVFuqD8HUiM8JDVJBis0R2xnRViRi7uxHRCqNfFXEJsW4mFdyA/exec";
+const { useState, useEffect, useCallback, useRef } = React;
 
-    const E_LEVELS = {
-      E0: { sla: 8, color: "#DC2626", bg: "#FEF2F2", border: "#FECACA", followUp1: "1–2 hrs after response", followUp2: "1 hr after 1st follow-up", followUp1Min: 60, followUp2Min: 60, priority: 0 },
-      E1: { sla: 8, color: "#EA580C", bg: "#FFF7ED", border: "#FED7AA", followUp1: "1–2 hrs after response", followUp2: "1 hr after 1st follow-up", followUp1Min: 60, followUp2Min: 60, priority: 1 },
-      E2: { sla: 16, color: "#CA8A04", bg: "#FEFCE8", border: "#FDE68A", followUp1: "2 hrs after response", followUp2: "4 hrs after 1st follow-up", followUp1Min: 120, followUp2Min: 240, priority: 2 },
-      E3: { sla: 24, color: "#2563EB", bg: "#EFF6FF", border: "#BFDBFE", followUp1: "2 hrs after response", followUp2: "4 hrs after 1st follow-up", followUp1Min: 120, followUp2Min: 240, priority: 3 },
-      E4: { sla: 24, color: "#7C3AED", bg: "#F5F3FF", border: "#DDD6FE", followUp1: "2 hrs after response", followUp2: "4 hrs after 1st follow-up", followUp1Min: 120, followUp2Min: 240, priority: 4 },
-    };
+const E_LEVELS = {
+  E0: { sla:8,  color:"#DC2626", bg:"#FEF2F2", border:"#FECACA", followUp1:"1–2 hrs after response", followUp2:"1 hr after 1st follow-up",  priority:0 },
+  E1: { sla:8,  color:"#EA580C", bg:"#FFF7ED", border:"#FED7AA", followUp1:"1–2 hrs after response", followUp2:"1 hr after 1st follow-up",  priority:1 },
+  E2: { sla:16, color:"#CA8A04", bg:"#FEFCE8", border:"#FDE68A", followUp1:"2 hrs after response",   followUp2:"4 hrs after 1st follow-up", priority:2 },
+  E3: { sla:24, color:"#2563EB", bg:"#EFF6FF", border:"#BFDBFE", followUp1:"2 hrs after response",   followUp2:"4 hrs after 1st follow-up", priority:3 },
+  E4: { sla:24, color:"#7C3AED", bg:"#F5F3FF", border:"#DDD6FE", followUp1:"2 hrs after response",   followUp2:"4 hrs after 1st follow-up", priority:4 },
+};
 
-    const STATUSES = ["Submitted", "In Progress", "Waiting for Customer", "Endorsed", "Resolved"];
+const GMV_TIERS = [
+  { key:"vip", label:"VIP",       range:"> $100,000",        standard:"E0", churn:"E0" },
+  { key:"l1",  label:"Level 1",   range:"$50,000 – $99,000", standard:"E1", churn:"E0" },
+  { key:"l2",  label:"Level 2",   range:"$30,000 – $49,000", standard:"E2", churn:"E1" },
+  { key:"l3",  label:"Level 3",   range:"$10,000 – $29,000", standard:"E3", churn:"E2" },
+  { key:"low", label:"Low Level", range:"< $10,000",         standard:"E4", churn:"E3" },
+];
 
-    const STEPS = {
-      E0: [
-        { id: 1, title: "Verify Ticket in Intercom", desc: "Confirm the ticket exists in Intercom under Voice Operations inbox. If raised elsewhere, redirect the case owner to create an Intercom ticket first." },
-        { id: 2, title: "Check & Pause Lower-Priority Cases", desc: "If you are mid-investigation on an E2/E3/E4, pause it now. Notify the originator of the lower-priority case with a clear timeline for resumption." },
-        { id: 3, title: "Tag Case as E0 Immediately", desc: "Apply E0 tag upon assignment. Remember: SLA starts at ticket creation, not at tagging. Check the creation timestamp now." },
-        { id: 4, title: "Set Status to 'In Progress'", desc: "Update Intercom status to 'In Progress' to signal active ownership." },
-        { id: 5, title: "Review Case Details", desc: "Read all provided details: Restaurant ID, escalation reason, WID call recording URL, and any additional context from COS/CSM." },
-        { id: 6, title: "Determine if Cross-Functional Collaboration is Needed", desc: "If YES → post in the restaurant's dedicated Slack channel and tag all relevant DRIs. If NO → work internally and document directly in Intercom." },
-        { id: 7, title: "Investigate & Identify Root Cause", desc: "Complete the investigation within 8 hrs of ticket creation. Document all findings, identified issues, and action items." },
-        { id: 8, title: "Post Response & Route Resolution", desc: "Post your response in the parent Intercom ticket. POS/Menu → Content Team (z_Content Menu Issues). Technical → Client Tech (z_Tech Issue). Link all child tickets to the parent." },
-        { id: 9, title: "Send 1st Follow-Up", desc: "1–2 hrs after posting your response, send a follow-up via the Intercom thread." },
-        { id: 10, title: "Send 2nd Follow-Up if No Response", desc: "1 hr after the 1st follow-up → escalate to the Client Slack #R-channel. Tag the originator and CC the RMT Lead + Manager." },
-        { id: 11, title: "Close or Escalate", desc: "No response after 2nd follow-up → close the ticket with a notice in Intercom. Multi-location case (e.g. Nice Day Restaurant) → each location counts as a separate E0." },
-      ],
-      E1: [
-        { id: 1, title: "Verify Ticket in Intercom", desc: "Confirm ticket exists in Intercom. Redirect if raised elsewhere." },
-        { id: 2, title: "Check for Active E0 Cases", desc: "E1 is second priority. If an E0 is active, continue that first." },
-        { id: 3, title: "Tag Case as E1 Immediately", desc: "Apply E1 tag. SLA clock started at ticket creation — verify the timestamp." },
-        { id: 4, title: "Set Status to 'In Progress'", desc: "Update Intercom status to 'In Progress'." },
-        { id: 5, title: "Review Case Details", desc: "Read all details: Restaurant ID, escalation reason, WID call recording URL, and COS/CSM context." },
-        { id: 6, title: "Determine if Cross-Functional Collaboration is Needed", desc: "If YES → Slack channel + tag DRIs. If NO → document directly in Intercom." },
-        { id: 7, title: "Investigate & Identify Root Cause", desc: "Complete investigation within 8 hrs of ticket creation." },
-        { id: 8, title: "Post Response & Route Resolution", desc: "Post response in Intercom. Route to Content or Tech. Link all child tickets to parent." },
-        { id: 9, title: "Send 1st Follow-Up", desc: "1–2 hrs after posting response, send follow-up via Intercom thread." },
-        { id: 10, title: "Send 2nd Follow-Up if No Response", desc: "1 hr after 1st follow-up → escalate to #R-channel on Slack. Tag originator, CC RMT Lead + Manager." },
-        { id: 11, title: "Close or Escalate", desc: "No response after 2nd follow-up → close ticket with notice in Intercom." },
-      ],
-      E2: [
-        { id: 1, title: "Verify Ticket in Intercom", desc: "Confirm ticket exists in Intercom. Redirect if raised elsewhere." },
-        { id: 2, title: "Check for Active E0 or E1 Cases", desc: "E2 is third priority. If any E0 or E1 is unresolved, continue those first. Notify the E2 originator of your ETA." },
-        { id: 3, title: "Tag Case as E2 Immediately", desc: "Apply E2 tag. SLA clock started at ticket creation — verify the timestamp." },
-        { id: 4, title: "Set Status to 'In Progress'", desc: "Update Intercom status to 'In Progress'." },
-        { id: 5, title: "Review Case Details", desc: "Review Restaurant ID, escalation reason, WID URL, and all COS/CSM context." },
-        { id: 6, title: "Determine if Cross-Functional Collaboration is Needed", desc: "If YES → Slack channel + tag DRIs. If NO → document in Intercom directly." },
-        { id: 7, title: "Investigate & Identify Root Cause", desc: "Complete investigation within 16 hrs of ticket creation." },
-        { id: 8, title: "Post Response & Route Resolution", desc: "Post response in Intercom. Route to Content or Tech. Link all child tickets to parent." },
-        { id: 9, title: "Send 1st Follow-Up", desc: "2 hrs after posting response, send follow-up via Intercom thread." },
-        { id: 10, title: "Send 2nd Follow-Up if No Response", desc: "4 hrs after 1st follow-up → escalate to #R-channel on Slack. Tag originator, CC RMT Lead + Manager." },
-        { id: 11, title: "Close or Endorse if Repeatedly Delayed", desc: "No response → close with Intercom notice. 2nd time review moved → endorse to RQC or AQC. Closing loop remains RMT's responsibility." },
-      ],
-      E3: [
-        { id: 1, title: "Verify Ticket in Intercom", desc: "Confirm ticket exists in Intercom. Redirect if raised elsewhere." },
-        { id: 2, title: "Check for Higher Priority Cases (E0–E2)", desc: "E3 is fourth priority. Finish all E0–E2 cases first. Inform the E3 case owner with an ETA." },
-        { id: 3, title: "Tag Case as E3 Immediately", desc: "Apply E3 tag. SLA clock started at ticket creation — verify the timestamp." },
-        { id: 4, title: "Set Status to 'In Progress'", desc: "Update Intercom status to 'In Progress'." },
-        { id: 5, title: "Review Case Details", desc: "Review Restaurant ID, escalation reason, WID URL, and all COS/CSM context." },
-        { id: 6, title: "Determine if Cross-Functional Collaboration is Needed", desc: "If YES → Slack channel + tag DRIs. If NO → document in Intercom directly." },
-        { id: 7, title: "Investigate & Identify Root Cause", desc: "Complete investigation within 24 hrs of ticket creation." },
-        { id: 8, title: "Post Response & Route Resolution", desc: "Post response in Intercom. Route to Content or Tech. Link all child tickets to parent." },
-        { id: 9, title: "Send 1st Follow-Up", desc: "2 hrs after posting response, send follow-up via Intercom thread." },
-        { id: 10, title: "Send 2nd Follow-Up if No Response", desc: "4 hrs after 1st follow-up → escalate to #R-channel on Slack. Tag originator, CC RMT Lead + Manager." },
-        { id: 11, title: "Close or Endorse if Repeatedly Delayed", desc: "No response → close with Intercom notice. 2nd time review moved → endorse to RQC or AQC. Closing loop remains RMT's responsibility." },
-      ],
-      E4: [
-        { id: 1, title: "Verify Ticket in Intercom", desc: "Confirm ticket exists in Intercom. Redirect if raised elsewhere." },
-        { id: 2, title: "Check for Higher Priority Cases (E0–E3)", desc: "E4 is lowest priority. Handle all higher-priority cases first. Notify E4 case owner with a clear ETA." },
-        { id: 3, title: "Check GMV Threshold Before Proceeding", desc: "Before end of week, discuss with Miguel and Sik: if high-priority cases prevent review, decide whether to proceed with E4 cases under $5,000 GMV." },
-        { id: 4, title: "Tag Case as E4 Immediately", desc: "Apply E4 tag. SLA clock started at ticket creation — verify the timestamp." },
-        { id: 5, title: "Set Status to 'In Progress'", desc: "Update Intercom status to 'In Progress'." },
-        { id: 6, title: "Review Case Details", desc: "Review Restaurant ID, escalation reason, WID URL, and all COS/CSM context." },
-        { id: 7, title: "Determine if Cross-Functional Collaboration is Needed", desc: "If YES → Slack channel + tag DRIs. If NO → document in Intercom directly." },
-        { id: 8, title: "Investigate & Identify Root Cause", desc: "Complete investigation within 24 hrs of ticket creation." },
-        { id: 9, title: "Post Response & Route Resolution", desc: "Post response in Intercom. Route to Content or Tech. Link all child tickets to parent." },
-        { id: 10, title: "Send 1st Follow-Up", desc: "2 hrs after posting response, send follow-up via Intercom thread." },
-        { id: 11, title: "Send 2nd Follow-Up if No Response", desc: "4 hrs after 1st follow-up → escalate to #R-channel on Slack. Tag originator, CC RMT Lead + Manager." },
-        { id: 12, title: "Close or Endorse if Repeatedly Delayed", desc: "No response → close with Intercom notice. 2nd time review moved → endorse to RQC or AQC. Closing loop remains RMT's responsibility." },
-      ],
-    };
+const STATUSES = ["Submitted","In Progress","Waiting for Customer","Endorsed","Resolved"];
 
-    const SLA_EXCEPTIONS = [
-      "E0 cases exceed the number of RMTs on shift → SLA for unassigned E0s starts after an RMT completes an existing E0.",
-      "Special days / holidays (e.g. Mother's Day, Christmas) when RMTs take calls all day → SLA clock starts only after clearing the queue.",
-      "Queue suddenly spikes and RMTs take calls for ≥1 hour → SLA adjusts based on hours spent on calls.",
-      "Multi-location cases (e.g. Nice Day Restaurant) → each location counts as one separate E0 case.",
-      "SLA follows office hours: 10:30 AM – 12:00 AM EST only.",
-    ];
+const STEPS = {
+  E0:[
+    {id:1,title:"Verify Ticket in Intercom",desc:"Confirm the ticket exists in Intercom under Voice Operations inbox. If raised elsewhere, redirect the case owner to create an Intercom ticket first."},
+    {id:2,title:"Check & Pause Lower-Priority Cases",desc:"If you are mid-investigation on an E2/E3/E4, pause it now. Notify the originator of the lower-priority case with a clear timeline for resumption."},
+    {id:3,title:"Tag Case as E0 Immediately",desc:"Apply E0 tag upon assignment. SLA starts at ticket creation, not at tagging. Check the creation timestamp now."},
+    {id:4,title:"Set Status to 'In Progress'",desc:"Update Intercom status to 'In Progress' to signal active ownership."},
+    {id:5,title:"Review Case Details",desc:"Read all provided details: Restaurant ID, escalation reason, WID call recording URL, and any additional context from COS/CSM."},
+    {id:6,title:"Determine if Cross-Functional Collaboration is Needed",desc:"If YES → post in the restaurant's dedicated Slack channel and tag all relevant DRIs. If NO → work internally and document directly in Intercom."},
+    {id:7,title:"Investigate & Identify Root Cause",desc:"Complete the investigation within 8 hrs of ticket creation. Document all findings, identified issues, and action items."},
+    {id:8,title:"Post Response & Route Resolution",desc:"Post your response in the parent Intercom ticket. POS/Menu → Content Team (z_Content Menu Issues). Technical → Client Tech (z_Tech Issue). Link all child tickets to the parent."},
+    {id:9,title:"Send 1st Follow-Up",desc:"1–2 hrs after posting your response, send a follow-up via the Intercom thread."},
+    {id:10,title:"Send 2nd Follow-Up if No Response",desc:"1 hr after the 1st follow-up → escalate to the Client Slack #R-channel. Tag the originator and CC the RMT Lead + Manager."},
+    {id:11,title:"Close or Escalate",desc:"No response after 2nd follow-up → close the ticket with a notice in Intercom. Multi-location case → each location counts as a separate E0."},
+  ],
+  E1:[
+    {id:1,title:"Verify Ticket in Intercom",desc:"Confirm ticket exists in Intercom. Redirect if raised elsewhere."},
+    {id:2,title:"Check for Active E0 Cases",desc:"E1 is second priority. If an E0 is active, continue that first."},
+    {id:3,title:"Tag Case as E1 Immediately",desc:"Apply E1 tag. SLA clock started at ticket creation — verify the timestamp."},
+    {id:4,title:"Set Status to 'In Progress'",desc:"Update Intercom status to 'In Progress'."},
+    {id:5,title:"Review Case Details",desc:"Read all details: Restaurant ID, escalation reason, WID call recording URL, and COS/CSM context."},
+    {id:6,title:"Determine if Cross-Functional Collaboration is Needed",desc:"If YES → Slack channel + tag DRIs. If NO → document directly in Intercom."},
+    {id:7,title:"Investigate & Identify Root Cause",desc:"Complete investigation within 8 hrs of ticket creation."},
+    {id:8,title:"Post Response & Route Resolution",desc:"Post response in Intercom. Route to Content or Tech. Link all child tickets to parent."},
+    {id:9,title:"Send 1st Follow-Up",desc:"1–2 hrs after posting response, send follow-up via Intercom thread."},
+    {id:10,title:"Send 2nd Follow-Up if No Response",desc:"1 hr after 1st follow-up → escalate to #R-channel on Slack. Tag originator, CC RMT Lead + Manager."},
+    {id:11,title:"Close or Escalate",desc:"No response after 2nd follow-up → close ticket with notice in Intercom."},
+  ],
+  E2:[
+    {id:1,title:"Verify Ticket in Intercom",desc:"Confirm ticket exists in Intercom. Redirect if raised elsewhere."},
+    {id:2,title:"Check for Active E0 or E1 Cases",desc:"E2 is third priority. If any E0 or E1 is unresolved, continue those first. Notify the E2 originator of your ETA."},
+    {id:3,title:"Tag Case as E2 Immediately",desc:"Apply E2 tag. SLA clock started at ticket creation — verify the timestamp."},
+    {id:4,title:"Set Status to 'In Progress'",desc:"Update Intercom status to 'In Progress'."},
+    {id:5,title:"Review Case Details",desc:"Review Restaurant ID, escalation reason, WID URL, and all COS/CSM context."},
+    {id:6,title:"Determine if Cross-Functional Collaboration is Needed",desc:"If YES → Slack channel + tag DRIs. If NO → document in Intercom directly."},
+    {id:7,title:"Investigate & Identify Root Cause",desc:"Complete investigation within 16 hrs of ticket creation."},
+    {id:8,title:"Post Response & Route Resolution",desc:"Post response in Intercom. Route to Content or Tech. Link all child tickets to parent."},
+    {id:9,title:"Send 1st Follow-Up",desc:"2 hrs after posting response, send follow-up via Intercom thread."},
+    {id:10,title:"Send 2nd Follow-Up if No Response",desc:"4 hrs after 1st follow-up → escalate to #R-channel on Slack. Tag originator, CC RMT Lead + Manager."},
+    {id:11,title:"Close or Endorse if Repeatedly Delayed",desc:"No response → close with Intercom notice. 2nd time review moved → endorse to RQC or AQC. Closing loop remains RMT's responsibility."},
+  ],
+  E3:[
+    {id:1,title:"Verify Ticket in Intercom",desc:"Confirm ticket exists in Intercom. Redirect if raised elsewhere."},
+    {id:2,title:"Check for Higher Priority Cases (E0–E2)",desc:"E3 is fourth priority. Finish all E0–E2 cases first. Inform the E3 case owner with an ETA."},
+    {id:3,title:"Tag Case as E3 Immediately",desc:"Apply E3 tag. SLA clock started at ticket creation — verify the timestamp."},
+    {id:4,title:"Set Status to 'In Progress'",desc:"Update Intercom status to 'In Progress'."},
+    {id:5,title:"Review Case Details",desc:"Review Restaurant ID, escalation reason, WID URL, and all COS/CSM context."},
+    {id:6,title:"Determine if Cross-Functional Collaboration is Needed",desc:"If YES → Slack channel + tag DRIs. If NO → document in Intercom directly."},
+    {id:7,title:"Investigate & Identify Root Cause",desc:"Complete investigation within 24 hrs of ticket creation."},
+    {id:8,title:"Post Response & Route Resolution",desc:"Post response in Intercom. Route to Content or Tech. Link all child tickets to parent."},
+    {id:9,title:"Send 1st Follow-Up",desc:"2 hrs after posting response, send follow-up via Intercom thread."},
+    {id:10,title:"Send 2nd Follow-Up if No Response",desc:"4 hrs after 1st follow-up → escalate to #R-channel on Slack. Tag originator, CC RMT Lead + Manager."},
+    {id:11,title:"Close or Endorse if Repeatedly Delayed",desc:"No response → close with Intercom notice. 2nd time review moved → endorse to RQC or AQC."},
+  ],
+  E4:[
+    {id:1,title:"Verify Ticket in Intercom",desc:"Confirm ticket exists in Intercom. Redirect if raised elsewhere."},
+    {id:2,title:"Check for Higher Priority Cases (E0–E3)",desc:"E4 is lowest priority. Handle all higher-priority cases first. Notify E4 case owner with a clear ETA."},
+    {id:3,title:"Check GMV Threshold Before Proceeding",desc:"Before end of week, discuss with Miguel and Sik: if high-priority cases prevent review, decide whether to proceed with E4 cases under $5,000 GMV."},
+    {id:4,title:"Tag Case as E4 Immediately",desc:"Apply E4 tag. SLA clock started at ticket creation — verify the timestamp."},
+    {id:5,title:"Set Status to 'In Progress'",desc:"Update Intercom status to 'In Progress'."},
+    {id:6,title:"Review Case Details",desc:"Review Restaurant ID, escalation reason, WID URL, and all COS/CSM context."},
+    {id:7,title:"Determine if Cross-Functional Collaboration is Needed",desc:"If YES → Slack channel + tag DRIs. If NO → document in Intercom directly."},
+    {id:8,title:"Investigate & Identify Root Cause",desc:"Complete investigation within 24 hrs of ticket creation."},
+    {id:9,title:"Post Response & Route Resolution",desc:"Post response in Intercom. Route to Content or Tech. Link all child tickets to parent."},
+    {id:10,title:"Send 1st Follow-Up",desc:"2 hrs after posting response, send follow-up via Intercom thread."},
+    {id:11,title:"Send 2nd Follow-Up if No Response",desc:"4 hrs after 1st follow-up → escalate to #R-channel on Slack. Tag originator, CC RMT Lead + Manager."},
+    {id:12,title:"Close or Endorse if Repeatedly Delayed",desc:"No response → close with Intercom notice. 2nd time review moved → endorse to RQC or AQC."},
+  ],
+};
 
-    const LOWER_ACTIONS = {
-      E2: ["Notify the case originator via Intercom: acknowledge receipt, state that a higher-priority case is being handled, and give a realistic ETA.", "Review the ticket details now so you're ready to investigate immediately when you pick it up.", "Check if any initial information is missing — request it from COS/CSM proactively so it's ready.", "Do not begin investigation yet — simply prepare and keep the ticket in view."],
-      E3: ["Notify the case originator via Intercom: acknowledge receipt, state that higher-priority cases are being handled first, and provide an ETA.", "Review the ticket details and flag any missing information — request it now so no time is lost later.", "If this case has already been moved once, begin coordinating with RMT Lead about potential endorsement to RQC or AQC.", "Do not begin investigation — stay focused on higher priority cases."],
-      E4: ["Notify the case originator via Intercom: acknowledge receipt and provide an honest ETA based on your current queue.", "Review ticket details passively — flag missing info and request it from COS/CSM.", "Check GMV: if this restaurant is under $5,000 GMV and you have multiple high-priority cases, flag it for discussion with Miguel and Sik before end of week.", "If the review time has already been moved once, coordinate with RMT Lead on endorsement to RQC or AQC."],
-    };
+const SLA_EXCEPTIONS = [
+  "E0 cases exceed the number of RMTs on shift → SLA for unassigned E0s starts after an RMT completes an existing E0.",
+  "Special days / holidays (e.g. Mother's Day, Christmas) when RMTs take calls all day → SLA clock starts only after clearing the queue.",
+  "Queue suddenly spikes and RMTs take calls for ≥1 hour → SLA adjusts based on hours spent on calls.",
+  "Multi-location cases (e.g. Nice Day Restaurant) → each location counts as one separate E0 case.",
+  "SLA follows office hours: 10:30 AM – 12:00 AM EST only.",
+];
 
-    // ─── SOUND ───
-    function playBeep(type = "followup1") {
-      try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const freqs = type === "followup2" ? [880, 660, 880] : [660, 880];
-        freqs.forEach((freq, i) => {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.connect(gain); gain.connect(ctx.destination);
-          osc.frequency.value = freq;
-          osc.type = "sine";
-          gain.gain.setValueAtTime(0.3, ctx.currentTime + i * 0.2);
-          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.2 + 0.3);
-          osc.start(ctx.currentTime + i * 0.2);
-          osc.stop(ctx.currentTime + i * 0.2 + 0.3);
-        });
-      } catch(e) {}
-    }
+const LOWER_ACTIONS = {
+  E2:["Notify the case originator via Intercom: acknowledge receipt, state that a higher-priority case is being handled, and give a realistic ETA.","Review the ticket details now so you're ready to investigate immediately when you pick it up.","Check if any initial information is missing — request it from COS/CSM proactively so it's ready.","Do not begin investigation yet — simply prepare and keep the ticket in view."],
+  E3:["Notify the case originator via Intercom: acknowledge receipt, state that higher-priority cases are being handled first, and provide an ETA.","Review the ticket details and flag any missing information — request it now so no time is lost later.","If this case has already been moved once, begin coordinating with RMT Lead about potential endorsement to RQC or AQC.","Do not begin investigation — stay focused on higher priority cases."],
+  E4:["Notify the case originator via Intercom: acknowledge receipt and provide an honest ETA based on your current queue.","Review ticket details passively — flag missing info and request it from COS/CSM.","Check GMV: if this restaurant is under $5,000 GMV and you have multiple high-priority cases, flag it for discussion with Miguel and Sik before end of week.","If the review time has already been moved once, coordinate with RMT Lead on endorsement to RQC or AQC."],
+};
 
-    async function saveToSheet(rmt, payload) {
-      try { await fetch(SCRIPT_URL, { method: "POST", body: JSON.stringify({ action: "save", rmt, payload }) }); } catch(e) {}
-    }
-    async function loadFromSheet(rmt) {
-      try {
-        const res = await fetch(`${SCRIPT_URL}?rmt=${encodeURIComponent(rmt)}`);
-        const json = await res.json();
-        return json.success && json.data ? json.data : null;
-      } catch(e) { return null; }
-    }
+const USEFUL_LINKS = [
+  {label:"Mistake Review",icon:"🔍",desc:"Review restaurant, internal, QA, coaching, modification, missing item, and dish mistakes.",url:"https://wondersco.lightdash.cloud/projects/e03ba889-b1c8-41d0-bb71-f480de3bf1aa/tables/mistakes"},
+  {label:"Restaurant Investigation",icon:"🏪",desc:"Deep-dive dashboard for investigating individual restaurant performance.",url:"https://wondersco.lightdash.cloud/projects/e03ba889-b1c8-41d0-bb71-f480de3bf1aa/dashboards/e3ba9c6f-32b3-4fdf-9d5a-ad0af412423c/view"},
+  {label:"Transcript",icon:"📝",desc:"View and search call transcripts for investigation.",url:"https://wondersco.lightdash.cloud/projects/e03ba889-b1c8-41d0-bb71-f480de3bf1aa/saved/03ee61a3-9414-41a1-9fb9-1a445c4b8e30/edit"},
+  {label:"EHT vs AHT with Transcript",icon:"⏱️",desc:"Compare estimated vs actual handle time alongside call transcripts.",url:"https://wondersco.lightdash.cloud/projects/e03ba889-b1c8-41d0-bb71-f480de3bf1aa/saved/920e3772-e4f7-484f-bc95-675a06741b6b/edit"},
+  {label:"RMT Audit Form",icon:"📋",desc:"Submit audit entries for RMT case reviews.",url:"https://docs.google.com/forms/d/e/1FAIpQLSdQrOx0UOpWoXHU_QNI6yexN0vC-iRUUNQ4du-pbiOXZCihXA/viewform"},
+  {label:"Enterprise Dashboard",icon:"📊",desc:"High-level enterprise performance dashboard filtered by restaurant.",url:"https://wondersco.lightdash.cloud/projects/e03ba889-b1c8-41d0-bb71-f480de3bf1aa/dashboards/0f6a88bb-007c-446f-b619-ba446e172ae4/view"},
+  {label:"Training Environment (GreenDot)",icon:"🟢",desc:"Access the GreenDot training environment for practice and testing.",url:"https://greendot.apac.prod.letsdowonders.io/greendot"},
+  {label:"GD QA Environment (GreenDot)",icon:"🔬",desc:"Access the GreenDot QA environment for quality assurance testing.",url:"https://greendot.qa.letsdowonders.io/greendot/restaurant/RRX86883"},
+];
 
-    // ─── NOTIFICATION BANNER ───
-    function NotificationBanner({ notifications, onDismiss }) {
-      if (!notifications.length) return null;
-      return (
-        <div style={{ position: "fixed", top: 16, right: 16, zIndex: 9999, display: "flex", flexDirection: "column", gap: 10, maxWidth: 360 }}>
-          {notifications.map(n => (
-            <div key={n.id} style={{ background: n.type === "followup2" ? "#7F1D1D" : "#1E3A5F", color: "#fff", borderRadius: 12, padding: "14px 16px", boxShadow: "0 8px 32px rgba(0,0,0,0.3)", animation: "slideIn 0.3s ease", display: "flex", gap: 12, alignItems: "flex-start" }}>
-              <span style={{ fontSize: 22, flexShrink: 0 }}>{n.type === "followup2" ? "🚨" : "⏰"}</span>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 3 }}>{n.type === "followup2" ? "2nd Follow-Up Due!" : "1st Follow-Up Due!"}</div>
-                <div style={{ fontSize: 12, opacity: 0.9 }}><strong>{n.level}</strong> · {n.label}</div>
-                <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>{n.type === "followup2" ? "Escalate to #R-channel on Slack now." : "Send follow-up via Intercom thread."}</div>
-              </div>
-              <button onClick={() => onDismiss(n.id)} style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontSize: 13, fontWeight: 700, flexShrink: 0 }}>✕</button>
-            </div>
-          ))}
+function playBeep(type){try{const ctx=new(window.AudioContext||window.webkitAudioContext)();const freqs=type==="followup2"?[880,660,880]:[660,880];freqs.forEach((freq,i)=>{const osc=ctx.createOscillator(),gain=ctx.createGain();osc.connect(gain);gain.connect(ctx.destination);osc.frequency.value=freq;osc.type="sine";gain.gain.setValueAtTime(0.3,ctx.currentTime+i*0.2);gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+i*0.2+0.3);osc.start(ctx.currentTime+i*0.2);osc.stop(ctx.currentTime+i*0.2+0.3);});}catch(e){}}
+
+// ── Persistent storage helpers ──────────────────────────────────────────────
+const STORAGE_KEY = rmt => `rmt-workflow:${rmt.toLowerCase().trim()}`;
+
+async function persistSave(rmt, payload) {
+  try {
+    await window.storage.set(STORAGE_KEY(rmt), JSON.stringify(payload));
+    return true;
+  } catch(e) {
+    console.warn("Storage save failed:", e);
+    return false;
+  }
+}
+
+async function persistLoad(rmt) {
+  try {
+    const result = await window.storage.get(STORAGE_KEY(rmt));
+    if (result && result.value) return JSON.parse(result.value);
+  } catch(e) {
+    // Key doesn't exist yet or parse error — that's fine for first-time users
+  }
+  return null;
+}
+
+// Also sync to Google Sheets in background (best-effort)
+async function sheetSync(rmt, payload) {
+  try { await fetch(SCRIPT_URL, {method:"POST", body:JSON.stringify({action:"save", rmt, payload})}); } catch(e) {}
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+
+function NotificationBanner({notifications,onDismiss}){
+  if(!notifications.length)return null;
+  return(
+    <div style={{position:"fixed",top:16,right:16,zIndex:9999,display:"flex",flexDirection:"column",gap:10,maxWidth:360}}>
+      {notifications.map(n=>(
+        <div key={n.id} style={{background:n.type==="followup2"?"#7F1D1D":"#1E3A5F",color:"#fff",borderRadius:12,padding:"14px 16px",boxShadow:"0 8px 32px rgba(0,0,0,0.3)",animation:"slideIn 0.3s ease",display:"flex",gap:12,alignItems:"flex-start"}}>
+          <span style={{fontSize:22,flexShrink:0}}>{n.type==="followup2"?"🚨":"⏰"}</span>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:800,fontSize:13,marginBottom:3}}>{n.type==="followup2"?"2nd Follow-Up Due!":"1st Follow-Up Due!"}</div>
+            <div style={{fontSize:12,opacity:0.9}}><strong>{n.level}</strong> · {n.label}</div>
+            <div style={{fontSize:11,opacity:0.7,marginTop:2}}>{n.type==="followup2"?"Escalate to #R-channel on Slack now.":"Send follow-up via Intercom thread."}</div>
+          </div>
+          <button onClick={()=>onDismiss(n.id)} style={{background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",borderRadius:6,padding:"2px 8px",cursor:"pointer",fontSize:13,fontWeight:700}}>✕</button>
         </div>
-      );
-    }
+      ))}
+    </div>
+  );
+}
 
-    function LoginScreen({ onLogin }) {
-      const [name, setName] = useState("");
-      const [loading, setLoading] = useState(false);
-      const submit = async () => { if (!name.trim()) return; setLoading(true); onLogin(name.trim()); };
-      return (
-        <div style={{ minHeight: "100vh", background: "linear-gradient(135deg, #0F172A, #1E3A5F)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-          <div style={{ background: "#fff", borderRadius: 20, padding: "40px 36px", maxWidth: 400, width: "100%", textAlign: "center", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}>🍽️</div>
-            <h1 style={{ fontSize: 22, fontWeight: 800, color: "#0F172A", marginBottom: 6 }}>RMT Escalation Workflow</h1>
-            <p style={{ fontSize: 13, color: "#64748B", marginBottom: 28 }}>Enter your name to load your personal queue and case data.</p>
-            <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Enter" && submit()} placeholder="Your full name (e.g. Maria Santos)"
-              style={{ width: "100%", border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "12px 14px", fontSize: 14, marginBottom: 14, outline: "none" }} autoFocus />
-            <button onClick={submit} disabled={!name.trim() || loading}
-              style={{ width: "100%", background: loading ? "#94A3B8" : "#1E3A5F", color: "#fff", border: "none", borderRadius: 10, padding: "13px", fontSize: 15, fontWeight: 700, cursor: name.trim() && !loading ? "pointer" : "not-allowed" }}>
-              {loading ? "Loading your data…" : "Enter Workflow →"}
-            </button>
-            <p style={{ fontSize: 11, color: "#94A3B8", marginTop: 16 }}>RMT Q1 2026 · DRI: @Liz</p>
+function ELevelTagger({onAddToQueue,onOpenGuide}){
+  const [tierKey,setTierKey]=useState("");
+  const [churn,setChurn]=useState("");
+  const [isEnt,setIsEnt]=useState("");
+  const [caseNum,setCaseNum]=useState("");
+  const [restId,setRestId]=useState("");
+  const [added,setAdded]=useState(false);
+  const tier=tierKey?GMV_TIERS.find(t=>t.key===tierKey):null;
+  let level=null,bumped=false,blocked=null;
+  if(tier&&churn!==""){
+    const raw=churn==="yes"?tier.churn:tier.standard;
+    if(raw==="E0"&&isEnt==="no"){level=churn==="yes"?tier.standard:"E1";blocked="E0 is reserved for VIP/enterprise clients only. Adjusted to "+level+".";}
+    else{level=raw;bumped=churn==="yes"&&tier.standard!==tier.churn;}
+  }
+  const lv=level?E_LEVELS[level]:null;
+  const ready=tier&&churn!==""&&(level!=="E0"||(level==="E0"&&isEnt!==""));
+  const handleAdd=()=>{if(!level)return;onAddToQueue({level,caseNumber:caseNum,restaurantId:restId});setAdded(true);setTimeout(()=>setAdded(false),3000);setCaseNum("");setRestId("");};
+  const reset=()=>{setTierKey("");setChurn("");setIsEnt("");setCaseNum("");setRestId("");setAdded(false);};
+  const inp={border:"1.5px solid #E2E8F0",borderRadius:9,padding:"9px 12px",fontSize:13,width:"100%",outline:"none",background:"#fff"};
+  const sel={...inp,cursor:"pointer"};
+  const lbl={fontSize:12,fontWeight:700,color:"#374151",marginBottom:5,display:"block"};
+  return(
+    <div style={{background:"#fff",borderRadius:14,padding:"22px",boxShadow:"0 1px 4px rgba(0,0,0,0.06)",border:"1px solid #E2E8F0"}}>
+      <h2 style={{margin:"0 0 4px",fontSize:16,fontWeight:800,color:"#0F172A"}}>🏷️ E-Level Tagger</h2>
+      <p style={{margin:"0 0 20px",fontSize:12,color:"#64748B"}}>Fill in the fields — the correct E-level tag will be determined automatically.</p>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
+        <div style={{gridColumn:"1/-1"}}><label style={lbl}>GMV Tier</label><select value={tierKey} onChange={e=>setTierKey(e.target.value)} style={sel}><option value="">— Select tier —</option>{GMV_TIERS.map(t=><option key={t.key} value={t.key}>{t.label} · {t.range}</option>)}</select></div>
+        <div><label style={lbl}>Churn Risk Status</label><select value={churn} onChange={e=>setChurn(e.target.value)} style={sel}><option value="">— Select —</option><option value="no">No churn risk</option><option value="yes">⚠️ Possible Churn</option></select></div>
+        <div><label style={lbl}>VIP / Enterprise Client?</label><select value={isEnt} onChange={e=>setIsEnt(e.target.value)} style={sel}><option value="">— Select —</option><option value="yes">Yes — VIP or enterprise</option><option value="no">No — standard account</option></select></div>
+        <div><label style={lbl}>Intercom Case # <span style={{color:"#94A3B8",fontWeight:400}}>(optional)</span></label><input value={caseNum} onChange={e=>setCaseNum(e.target.value)} placeholder="e.g. 123456" style={inp}/></div>
+        <div><label style={lbl}>Restaurant ID <span style={{color:"#94A3B8",fontWeight:400}}>(optional)</span></label><input value={restId} onChange={e=>setRestId(e.target.value)} placeholder="e.g. RRX86883" style={inp}/></div>
+      </div>
+      {ready&&level&&lv&&(
+        <div style={{border:`2px solid ${lv.border}`,borderRadius:12,overflow:"hidden",marginBottom:14,animation:"popIn .25s ease"}}>
+          <div style={{background:lv.color,padding:"14px 18px",display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+            <span style={{background:"#fff",color:lv.color,fontWeight:900,fontSize:22,borderRadius:8,padding:"4px 18px"}}>{level}</span>
+            <div style={{color:"#fff"}}><div style={{fontWeight:800,fontSize:14}}>{bumped?"Priority bumped due to Churn Risk":"Standard priority applied"}</div><div style={{fontSize:12,opacity:.85}}>SLA: {lv.sla} hrs · Office hours only</div></div>
+          </div>
+          <div style={{background:lv.bg,padding:"12px 18px",display:"flex",flexDirection:"column",gap:8}}>
+            {bumped&&<div style={{fontSize:12,color:"#374151"}}>🔺 Bumped from <strong>{tier.standard}</strong> → <strong>{level}</strong> due to Churn Risk flag.</div>}
+            {blocked&&<div style={{fontSize:12,color:"#92400E",background:"#FFF7ED",borderRadius:7,padding:"8px 12px"}}>⚠️ {blocked}</div>}
+            {level==="E0"&&!blocked&&<div style={{fontSize:12,color:"#991B1B",background:"#FEF2F2",borderRadius:7,padding:"8px 12px"}}>⚠️ E0 confirmed — loop in senior leadership or dedicated DRI immediately.</div>}
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}}>
+              <button onClick={handleAdd} style={{background:lv.color,color:"#fff",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>{added?"✓ Added to Queue!":"+ Add to Case Queue"}</button>
+              <button onClick={()=>onOpenGuide(level)} style={{background:"#fff",color:lv.color,border:`1.5px solid ${lv.border}`,borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>Open {level} Guide →</button>
+              <button onClick={reset} style={{background:"#F1F5F9",color:"#64748B",border:"1px solid #E2E8F0",borderRadius:8,padding:"8px 14px",fontSize:13,fontWeight:600,cursor:"pointer"}}>Reset</button>
+            </div>
           </div>
         </div>
-      );
+      )}
+      <div style={{background:"#F8FAFC",borderRadius:10,padding:"14px 16px",border:"1px solid #E2E8F0"}}>
+        <p style={{fontSize:11,fontWeight:800,color:"#64748B",marginBottom:10,letterSpacing:".04em"}}>PRIORITY MATRIX REFERENCE</p>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead><tr style={{borderBottom:"1px solid #E2E8F0"}}>{["Tier","GMV Range","Standard","Churn Risk"].map(h=><th key={h} style={{padding:"6px 10px",textAlign:"left",fontWeight:700,color:"#374151"}}>{h}</th>)}</tr></thead>
+          <tbody>{GMV_TIERS.map(t=>(<tr key={t.key} style={{borderBottom:"1px solid #F1F5F9"}}><td style={{padding:"6px 10px",fontWeight:700,color:"#0F172A"}}>{t.label}</td><td style={{padding:"6px 10px",color:"#374151"}}>{t.range}</td><td style={{padding:"6px 10px"}}><span style={{background:E_LEVELS[t.standard].bg,color:E_LEVELS[t.standard].color,border:`1px solid ${E_LEVELS[t.standard].border}`,borderRadius:5,padding:"2px 8px",fontWeight:800}}>{t.standard}</span></td><td style={{padding:"6px 10px"}}><span style={{background:E_LEVELS[t.churn].bg,color:E_LEVELS[t.churn].color,border:`1px solid ${E_LEVELS[t.churn].border}`,borderRadius:5,padding:"2px 8px",fontWeight:800}}>{t.churn}</span>{t.standard===t.churn&&<span style={{fontSize:10,color:"#94A3B8",marginLeft:5}}>no change</span>}</td></tr>))}</tbody>
+        </table>
+        <p style={{fontSize:10,color:"#94A3B8",marginTop:8}}>E0 reserved for VIP/enterprise only · Churn risk bumps one tier up</p>
+      </div>
+    </div>
+  );
+}
+
+function LoginScreen({onLogin}){
+  const [name,setName]=useState("");
+  const [loading,setLoading]=useState(false);
+  const submit=async()=>{
+    if(!name.trim())return;
+    setLoading(true);
+    await onLogin(name.trim());
+  };
+  return(
+    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#0F172A,#1E3A5F)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{background:"#fff",borderRadius:20,padding:"40px 36px",maxWidth:400,width:"100%",textAlign:"center",boxShadow:"0 20px 60px rgba(0,0,0,0.3)"}}>
+        <div style={{fontSize:48,marginBottom:12}}>🍽️</div>
+        <h1 style={{fontSize:22,fontWeight:800,color:"#0F172A",marginBottom:6}}>RMT Escalation Workflow</h1>
+        <p style={{fontSize:13,color:"#64748B",marginBottom:28}}>Enter your name to load your saved queue and cases.</p>
+        <input value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()} placeholder="Your full name (e.g. Maria Santos)" style={{width:"100%",border:"1.5px solid #E2E8F0",borderRadius:10,padding:"12px 14px",fontSize:14,marginBottom:14,outline:"none"}} autoFocus/>
+        <button onClick={submit} disabled={!name.trim()||loading} style={{width:"100%",background:loading?"#94A3B8":"#1E3A5F",color:"#fff",border:"none",borderRadius:10,padding:"13px",fontSize:15,fontWeight:700,cursor:name.trim()&&!loading?"pointer":"not-allowed",display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
+          {loading&&<div style={{width:16,height:16,border:"2px solid rgba(255,255,255,.4)",borderTopColor:"#fff",borderRadius:"50%",animation:"spin .7s linear infinite"}}/>}
+          {loading?"Loading your data…":"Enter Workflow →"}
+        </button>
+        <p style={{fontSize:11,color:"#94A3B8",marginTop:16}}>RMT Q1 2026 · DRI: @Liz</p>
+        <p style={{fontSize:11,color:"#BBD1E8",marginTop:6}}>💾 Your data is saved and restored each session</p>
+      </div>
+    </div>
+  );
+}
+
+function App(){
+  const [rmtName,setRmtName]=useState(null);
+  const [view,setView]=useState("triage");
+  const [selectedLevel,setSelectedLevel]=useState(null);
+  const [completedSteps,setCompletedSteps]=useState({});
+  const [currentStatus,setCurrentStatus]=useState("Submitted");
+  const [activeCases,setActiveCases]=useState([]);
+  const [resolvedCases,setResolvedCases]=useState([]);
+  const [endorsedCases,setEndorsedCases]=useState([]);
+  const [newCase,setNewCase]=useState({level:"E0",caseNumber:"",restaurantId:""});
+  const [interruptLevel,setInterruptLevel]=useState(null);
+  const [currentWorkingLevel,setCurrentWorkingLevel]=useState(null);
+  const [showExceptions,setShowExceptions]=useState(false);
+  const [showLowerGuide,setShowLowerGuide]=useState({});
+  const [showEndorseGuide,setShowEndorseGuide]=useState({});
+  const [saveStatus,setSaveStatus]=useState(null); // null | "saving" | "saved" | "error"
+  const [notifications,setNotifications]=useState([]);
+  const [followUpTimers,setFollowUpTimers]=useState({});
+  const notifIdRef=useRef(0);
+  const saveTimeoutRef=useRef(null);
+
+  const steps=selectedLevel?STEPS[selectedLevel]:[];
+  const doneCount=steps.filter(s=>!!completedSteps[`${selectedLevel}-${s.id}`]).length;
+  const pct=steps.length?Math.round((doneCount/steps.length)*100):0;
+  const el=selectedLevel?E_LEVELS[selectedLevel]:null;
+  const ts=()=>new Date().toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+
+  // ── Save all state to persistent storage ───────────────────────────────────
+  const save = useCallback(async (ac, rc, ec, cs) => {
+    if (!rmtName) return;
+    setSaveStatus("saving");
+    const payload = { activeCases: ac, resolvedCases: rc, endorsedCases: ec, completedSteps: cs };
+    const ok = await persistSave(rmtName, payload);
+    setSaveStatus(ok ? "saved" : "error");
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(() => setSaveStatus(null), 2500);
+    // Background sync to Google Sheets
+    sheetSync(rmtName, payload);
+  }, [rmtName]);
+
+  // ── Load state on login ────────────────────────────────────────────────────
+  const handleLogin = useCallback(async name => {
+    if (Notification.permission === "default") Notification.requestPermission();
+    const data = await persistLoad(name);
+    if (data) {
+      if (data.activeCases)   setActiveCases(data.activeCases);
+      if (data.resolvedCases) setResolvedCases(data.resolvedCases);
+      if (data.endorsedCases) setEndorsedCases(data.endorsedCases);
+      if (data.completedSteps) setCompletedSteps(data.completedSteps);
     }
+    setRmtName(name);
+  }, []);
 
-    function App() {
-      const [rmtName, setRmtName] = useState(null);
-      const [view, setView] = useState("triage");
-      const [selectedLevel, setSelectedLevel] = useState(null);
-      const [completedSteps, setCompletedSteps] = useState({});
-      const [currentStatus, setCurrentStatus] = useState("Submitted");
-      const [activeCases, setActiveCases] = useState([]);
-      const [resolvedCases, setResolvedCases] = useState([]);
-      const [endorsedCases, setEndorsedCases] = useState([]);
-      const [newCase, setNewCase] = useState({ level: "E0", caseNumber: "", restaurantId: "" });
-      const [interruptLevel, setInterruptLevel] = useState(null);
-      const [currentWorkingLevel, setCurrentWorkingLevel] = useState(null);
-      const [showExceptions, setShowExceptions] = useState(false);
-      const [showLowerGuide, setShowLowerGuide] = useState({});
-      const [showEndorseGuide, setShowEndorseGuide] = useState({});
-      const [saveStatus, setSaveStatus] = useState(null);
-      const [dataLoaded, setDataLoaded] = useState(false);
-      const [notifications, setNotifications] = useState([]);
-      const [followUpTimers, setFollowUpTimers] = useState({}); // { caseId: { followup1StartedAt, followup2StartedAt } }
-      const notifIdRef = useRef(0);
-
-      const steps = selectedLevel ? STEPS[selectedLevel] : [];
-      const doneCount = steps.filter(s => !!completedSteps[`${selectedLevel}-${s.id}`]).length;
-      const pct = steps.length ? Math.round((doneCount / steps.length) * 100) : 0;
-      const el = selectedLevel ? E_LEVELS[selectedLevel] : null;
-      const ts = () => new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-
-      // ─── TIMER CHECK — runs every 30 seconds ───
-      useEffect(() => {
-        if (!rmtName) return;
-        const interval = setInterval(() => {
-          const now = Date.now();
-          setFollowUpTimers(prev => {
-            const next = { ...prev };
-            Object.entries(prev).forEach(([caseId, timers]) => {
-              const c = activeCases.find(x => String(x.id) === String(caseId));
-              if (!c) return;
-              if (timers.followup1FireAt && !timers.followup1Fired && now >= timers.followup1FireAt) {
-                triggerNotification(c, "followup1");
-                next[caseId] = { ...next[caseId], followup1Fired: true };
-              }
-              if (timers.followup2FireAt && !timers.followup2Fired && now >= timers.followup2FireAt) {
-                triggerNotification(c, "followup2");
-                next[caseId] = { ...next[caseId], followup2Fired: true };
-              }
-            });
-            return next;
-          });
-        }, 30000);
-        return () => clearInterval(interval);
-      }, [rmtName, activeCases]);
-
-      const triggerNotification = (c, type) => {
-        playBeep(type);
-        const id = ++notifIdRef.current;
-        setNotifications(prev => [...prev, { id, type, level: c.level, label: c.label }]);
-        // Request browser notification if permitted
-        if (Notification.permission === "granted") {
-          new Notification(type === "followup2" ? "🚨 2nd Follow-Up Due!" : "⏰ 1st Follow-Up Due!", {
-            body: `${c.level} · ${c.label} — ${type === "followup2" ? "Escalate to #R-channel now." : "Send follow-up via Intercom."}`,
-          });
-        }
-      };
-
-      const dismissNotif = (id) => setNotifications(prev => prev.filter(n => n.id !== id));
-
-      const setFollowUpTime = (caseId, which, timeStr) => {
-        if (!timeStr) return;
-        const [h, m] = timeStr.split(":").map(Number);
-        const fireAt = new Date();
-        fireAt.setHours(h, m, 0, 0);
-        if (fireAt.getTime() <= Date.now()) fireAt.setDate(fireAt.getDate() + 1);
-        setFollowUpTimers(prev => ({
-          ...prev,
-          [caseId]: { ...prev[caseId], [`${which}FireAt`]: fireAt.getTime(), [`${which}TimeStr`]: timeStr, [`${which}Fired`]: false }
-        }));
-      };
-
-      const clearFollowUpTimer = (caseId, which) => {
-        setFollowUpTimers(prev => {
-          const next = { ...prev, [caseId]: { ...prev[caseId] } };
-          delete next[caseId][`${which}FireAt`];
-          delete next[caseId][`${which}TimeStr`];
-          delete next[caseId][`${which}Fired`];
-          return next;
+  // ── Follow-up timer polling ────────────────────────────────────────────────
+  useEffect(()=>{
+    if(!rmtName)return;
+    const interval=setInterval(()=>{
+      const now=Date.now();
+      setFollowUpTimers(prev=>{
+        const next={...prev};let changed=false;
+        Object.entries(prev).forEach(([caseId,timers])=>{
+          const c=activeCases.find(x=>String(x.id)===String(caseId));if(!c)return;
+          if(timers.followup1FireAt&&!timers.followup1Fired&&now>=timers.followup1FireAt){triggerNotif(c,"followup1");next[caseId]={...next[caseId],followup1Fired:true};changed=true;}
+          if(timers.followup2FireAt&&!timers.followup2Fired&&now>=timers.followup2FireAt){triggerNotif(c,"followup2");next[caseId]={...next[caseId],followup2Fired:true};changed=true;}
         });
-      };
+        return changed?next:prev;
+      });
+    },30000);
+    return()=>clearInterval(interval);
+  },[rmtName,activeCases]);
 
-      const handleLogin = useCallback(async (name) => {
-        setRmtName(name);
-        if (Notification.permission === "default") Notification.requestPermission();
-        const data = await loadFromSheet(name);
-        if (data) {
-          if (data.activeCases) setActiveCases(data.activeCases);
-          if (data.resolvedCases) setResolvedCases(data.resolvedCases);
-          if (data.endorsedCases) setEndorsedCases(data.endorsedCases);
-          if (data.completedSteps) setCompletedSteps(data.completedSteps);
-        }
-        setDataLoaded(true);
-      }, []);
+  const triggerNotif=(c,type)=>{playBeep(type);const id=++notifIdRef.current;setNotifications(prev=>[...prev,{id,type,level:c.level,label:c.label}]);if(Notification.permission==="granted")new Notification(type==="followup2"?"🚨 2nd Follow-Up Due!":"⏰ 1st Follow-Up Due!",{body:`${c.level} · ${c.label}`});};
+  const dismissNotif=id=>setNotifications(prev=>prev.filter(n=>n.id!==id));
+  const setFollowUpTime=(caseId,which,timeStr)=>{if(!timeStr)return;const [h,m]=timeStr.split(":").map(Number);const fireAt=new Date();fireAt.setHours(h,m,0,0);if(fireAt.getTime()<=Date.now())fireAt.setDate(fireAt.getDate()+1);setFollowUpTimers(prev=>({...prev,[caseId]:{...prev[caseId],[`${which}FireAt`]:fireAt.getTime(),[`${which}TimeStr`]:timeStr,[`${which}Fired`]:false}}));};
+  const clearFollowUpTimer=(caseId,which)=>{setFollowUpTimers(prev=>{const next={...prev,[caseId]:{...prev[caseId]}};delete next[caseId][`${which}FireAt`];delete next[caseId][`${which}TimeStr`];delete next[caseId][`${which}Fired`];return next;});};
 
-      const save = useCallback(async (ac, rc, ec, cs) => {
-        if (!rmtName) return;
-        setSaveStatus("saving");
-        await saveToSheet(rmtName, { activeCases: ac, resolvedCases: rc, endorsedCases: ec, completedSteps: cs });
-        setSaveStatus("saved");
-        setTimeout(() => setSaveStatus(null), 2500);
-      }, [rmtName]);
+  // ── Helpers that update state + trigger save ───────────────────────────────
+  const setAndSaveActive   = fn => setActiveCases(prev   => { const next=typeof fn==="function"?fn(prev):fn;   save(next,resolvedCases,endorsedCases,completedSteps); return next; });
+  const setAndSaveResolved = fn => setResolvedCases(prev  => { const next=typeof fn==="function"?fn(prev):fn;   save(activeCases,next,endorsedCases,completedSteps);   return next; });
+  const setAndSaveEndorsed = fn => setEndorsedCases(prev  => { const next=typeof fn==="function"?fn(prev):fn;   save(activeCases,resolvedCases,next,completedSteps);   return next; });
+  const toggleStep = stepId => {
+    setCompletedSteps(prev => {
+      const next = {...prev, [`${selectedLevel}-${stepId}`]: !prev[`${selectedLevel}-${stepId}`]};
+      save(activeCases, resolvedCases, endorsedCases, next);
+      return next;
+    });
+  };
 
-      const setAndSaveActive = (fn) => setActiveCases(prev => { const next = typeof fn === "function" ? fn(prev) : fn; save(next, resolvedCases, endorsedCases, completedSteps); return next; });
-      const setAndSaveResolved = (fn) => setResolvedCases(prev => { const next = typeof fn === "function" ? fn(prev) : fn; save(activeCases, next, endorsedCases, completedSteps); return next; });
-      const setAndSaveEndorsed = (fn) => setEndorsedCases(prev => { const next = typeof fn === "function" ? fn(prev) : fn; save(activeCases, resolvedCases, next, completedSteps); return next; });
+  const addCase=(overrides={})=>{
+    const c={...newCase,...overrides};if(!c.caseNumber?.trim()&&!c.restaurantId?.trim())return;
+    const label=`${c.caseNumber?`#${c.caseNumber}`:""}${c.caseNumber&&c.restaurantId?" · ":""}${c.restaurantId?`RID: ${c.restaurantId}`:""}`;
+    setAndSaveActive(p=>[...p,{...c,id:Date.now(),label,status:"Submitted"}].sort((a,b)=>E_LEVELS[a.level].priority-E_LEVELS[b.level].priority));
+    if(!Object.keys(overrides).length)setNewCase({level:"E0",caseNumber:"",restaurantId:""});
+  };
 
-      const toggleStep = (stepId) => {
-        setCompletedSteps(prev => {
-          const next = { ...prev, [`${selectedLevel}-${stepId}`]: !prev[`${selectedLevel}-${stepId}`] };
-          save(activeCases, resolvedCases, endorsedCases, next);
-          return next;
-        });
-      };
+  const removeCase=id=>setAndSaveActive(p=>p.filter(c=>c.id!==id));
 
-      const addCase = () => {
-        if (!newCase.caseNumber.trim() && !newCase.restaurantId.trim()) return;
-        const label = `${newCase.caseNumber ? `#${newCase.caseNumber}` : ""}${newCase.caseNumber && newCase.restaurantId ? " · " : ""}${newCase.restaurantId ? `RID: ${newCase.restaurantId}` : ""}`;
-        setAndSaveActive(p => [...p, { ...newCase, id: Date.now(), label, status: "Submitted" }].sort((a, b) => E_LEVELS[a.level].priority - E_LEVELS[b.level].priority));
-        setNewCase({ level: "E0", caseNumber: "", restaurantId: "" });
-      };
+  const updateCaseStatus=(id,status)=>{
+    const c=activeCases.find(c=>c.id===id);const t=ts();
+    if(status==="Resolved"){
+      if(c){
+        const nextResolved=[{...c,status:"Resolved",resolvedAt:t},...resolvedCases];
+        const nextActive=activeCases.filter(x=>x.id!==id);
+        setResolvedCases(nextResolved);
+        setActiveCases(nextActive);
+        save(nextActive,nextResolved,endorsedCases,completedSteps);
+      }
+    } else if(status==="Endorsed"){
+      if(c){
+        const nextEndorsed=[{...c,status:"Endorsed",endorsedAt:t},...endorsedCases];
+        const nextActive=activeCases.filter(x=>x.id!==id);
+        setEndorsedCases(nextEndorsed);
+        setActiveCases(nextActive);
+        save(nextActive,resolvedCases,nextEndorsed,completedSteps);
+      }
+    } else {
+      setAndSaveActive(p=>p.map(x=>x.id===id?{...x,status}:x));
+    }
+  };
 
-      const removeCase = (id) => setAndSaveActive(p => p.filter(c => c.id !== id));
+  const resolveEndorsed=id=>{
+    const c=endorsedCases.find(c=>c.id===id);const t=ts();
+    if(c){
+      const nextResolved=[{...c,status:"Resolved",resolvedAt:t},...resolvedCases];
+      const nextEndorsed=endorsedCases.filter(x=>x.id!==id);
+      setResolvedCases(nextResolved);
+      setEndorsedCases(nextEndorsed);
+      save(activeCases,nextResolved,nextEndorsed,completedSteps);
+    }
+  };
 
-      const updateCaseStatus = (id, status) => {
-        const c = activeCases.find(c => c.id === id);
-        const t = ts();
-        if (status === "Resolved") {
-          if (c) { setResolvedCases(prev => { const next = [{ ...c, status: "Resolved", resolvedAt: t }, ...prev]; save(activeCases.filter(x => x.id !== id), next, endorsedCases, completedSteps); return next; }); setActiveCases(p => p.filter(x => x.id !== id)); }
-        } else if (status === "Endorsed") {
-          if (c) { setEndorsedCases(prev => { const next = [{ ...c, status: "Endorsed", endorsedAt: t }, ...prev]; save(activeCases.filter(x => x.id !== id), resolvedCases, next, completedSteps); return next; }); setActiveCases(p => p.filter(x => x.id !== id)); }
-        } else { setAndSaveActive(p => p.map(x => x.id === id ? { ...x, status } : x)); }
-      };
+  const openGuide=level=>{setSelectedLevel(level);setView("guide");};
 
-      const resolveEndorsed = (id) => {
-        const c = endorsedCases.find(c => c.id === id);
-        const t = ts();
-        if (c) { setResolvedCases(prev => { const next = [{ ...c, status: "Resolved", resolvedAt: t }, ...prev]; save(activeCases, next, endorsedCases.filter(x => x.id !== id), completedSteps); return next; }); setEndorsedCases(p => p.filter(x => x.id !== id)); }
-      };
+  const handleLogout=()=>{
+    setRmtName(null);setActiveCases([]);setResolvedCases([]);setEndorsedCases([]);
+    setCompletedSteps({});setFollowUpTimers({});setNotifications([]);
+    setView("triage");setSelectedLevel(null);
+  };
 
-      if (!rmtName) return <LoginScreen onLogin={handleLogin} />;
+  if(!rmtName)return <LoginScreen onLogin={handleLogin}/>;
 
-      return (
-        <div style={{ fontFamily: "'Inter', sans-serif", background: "#F1F5F9", minHeight: "100vh", padding: "20px 16px" }}>
-          <NotificationBanner notifications={notifications} onDismiss={dismissNotif} />
-          <div style={{ maxWidth: 740, margin: "0 auto" }}>
+  const TABS=[
+    {key:"triage",      icon:"🗂️", label:"Case Triage"},
+    {key:"tagger",      icon:"🏷️", label:"E-Level Tagger"},
+    {key:"guide",       icon:"🧭", label:"Resolution Guide"},
+    {key:"interruption",icon:"⚡", label:"Interruption Handler"},
+    {key:"sla",         icon:"⏱️", label:"SLA Reference"},
+    {key:"links",       icon:"🔗", label:"Useful Links"},
+  ];
 
-            {/* Header */}
-            <div style={{ background: "linear-gradient(135deg, #0F172A 0%, #1E3A5F 100%)", borderRadius: 16, padding: "22px 26px", marginBottom: 20, color: "#fff" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
-                <div>
-                  <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>🍽️ RMT Escalation Decision Support</h1>
-                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "#94A3B8" }}>Logged in as <strong style={{ color: "#fff" }}>{rmtName}</strong> · Q1 2026</p>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  {saveStatus && <span style={{ fontSize: 12, color: saveStatus === "saved" ? "#4ADE80" : saveStatus === "error" ? "#F87171" : "#94A3B8", fontWeight: 600 }}>{saveStatus === "saving" ? "💾 Saving…" : saveStatus === "saved" ? "✓ Saved" : "⚠ Save failed"}</span>}
-                  <button onClick={() => { setRmtName(null); setDataLoaded(false); setActiveCases([]); setResolvedCases([]); setEndorsedCases([]); setCompletedSteps({}); setFollowUpTimers({}); setNotifications([]); }}
-                    style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Switch User</button>
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
-                {[{ key: "triage", icon: "🗂️", label: "Case Triage" }, { key: "guide", icon: "🧭", label: "Resolution Guide" }, { key: "interruption", icon: "⚡", label: "Interruption Handler" }, { key: "sla", icon: "⏱️", label: "SLA Reference" }, { key: "links", icon: "🔗", label: "Useful Links" }].map(tab => (
-                  <button key={tab.key} onClick={() => setView(tab.key)} style={{ background: view === tab.key ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.07)", border: view === tab.key ? "1.5px solid rgba(255,255,255,0.5)" : "1.5px solid rgba(255,255,255,0.1)", color: "#fff", borderRadius: 8, padding: "7px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-                    {tab.icon} {tab.label}
-                  </button>
-                ))}
-              </div>
+  const saveIndicator = saveStatus === "saving" ? {icon:"💾", text:"Saving…", color:"#94A3B8"}
+    : saveStatus === "saved"  ? {icon:"✓",  text:"Saved",  color:"#4ADE80"}
+    : saveStatus === "error"  ? {icon:"⚠️", text:"Save failed", color:"#FCA5A5"}
+    : null;
+
+  return(
+    <div style={{fontFamily:"'Inter',sans-serif",background:"#F1F5F9",minHeight:"100vh",padding:"20px 16px"}}>
+      <NotificationBanner notifications={notifications} onDismiss={dismissNotif}/>
+      <div style={{maxWidth:740,margin:"0 auto"}}>
+
+        {/* Header */}
+        <div style={{background:"linear-gradient(135deg,#0F172A 0%,#1E3A5F 100%)",borderRadius:16,padding:"22px 26px",marginBottom:20,color:"#fff"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10}}>
+            <div>
+              <h1 style={{margin:0,fontSize:20,fontWeight:800}}>🍽️ RMT Escalation Decision Support</h1>
+              <p style={{margin:"4px 0 0",fontSize:12,color:"#94A3B8"}}>Logged in as <strong style={{color:"#fff"}}>{rmtName}</strong> · Q1 2026</p>
             </div>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              {saveIndicator&&(
+                <span style={{fontSize:12,color:saveIndicator.color,fontWeight:600}}>
+                  {saveIndicator.icon} {saveIndicator.text}
+                </span>
+              )}
+              <button onClick={handleLogout} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.2)",color:"#fff",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>Switch User</button>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8,marginTop:16,flexWrap:"wrap"}}>
+            {TABS.map(tab=><button key={tab.key} onClick={()=>setView(tab.key)} style={{background:view===tab.key?"rgba(255,255,255,0.2)":"rgba(255,255,255,0.07)",border:view===tab.key?"1.5px solid rgba(255,255,255,0.5)":"1.5px solid rgba(255,255,255,0.1)",color:"#fff",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:600,cursor:"pointer"}}>{tab.icon} {tab.label}</button>)}
+          </div>
+        </div>
 
-            {/* ─── TRIAGE ─── */}
-            {view === "triage" && (
-              <div>
-                <div style={{ background: "#fff", borderRadius: 14, padding: "20px", marginBottom: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", border: "1px solid #E2E8F0" }}>
-                  <h2 style={{ margin: "0 0 4px", fontSize: 16, fontWeight: 800, color: "#0F172A" }}>📋 Active Case Queue</h2>
-                  <p style={{ margin: "0 0 16px", fontSize: 12, color: "#64748B" }}>Cases are auto-sorted by priority (E0 first). Handle top-of-queue first — never FIFO.</p>
-                  <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-                    <select value={newCase.level} onChange={e => setNewCase(p => ({ ...p, level: e.target.value }))}
-                      style={{ border: "1px solid #E2E8F0", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontWeight: 700, color: E_LEVELS[newCase.level].color, background: E_LEVELS[newCase.level].bg, cursor: "pointer" }}>
-                      {Object.keys(E_LEVELS).map(l => <option key={l} value={l}>{l}</option>)}
-                    </select>
-                    <input value={newCase.caseNumber} onChange={e => setNewCase(p => ({ ...p, caseNumber: e.target.value }))} placeholder="Intercom Case #" onKeyDown={e => e.key === "Enter" && addCase()} style={{ flex: 1, border: "1px solid #E2E8F0", borderRadius: 8, padding: "8px 12px", fontSize: 13, minWidth: 120 }} />
-                    <input value={newCase.restaurantId} onChange={e => setNewCase(p => ({ ...p, restaurantId: e.target.value }))} placeholder="Restaurant ID" onKeyDown={e => e.key === "Enter" && addCase()} style={{ flex: 1, border: "1px solid #E2E8F0", borderRadius: 8, padding: "8px 12px", fontSize: 13, minWidth: 120 }} />
-                    <button onClick={addCase} style={{ background: "#1E3A5F", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>+ Add</button>
-                  </div>
-
-                  {activeCases.length === 0 && <div style={{ textAlign: "center", padding: "30px 0", color: "#94A3B8", fontSize: 13 }}>No cases in queue. Add a case above to get started.</div>}
-
-                  {activeCases.map((c, idx) => {
-                    const lv = E_LEVELS[c.level];
-                    const isWaiting = c.status === "Waiting for Customer";
-                    const firstActiveIdx = activeCases.findIndex(x => x.status !== "Waiting for Customer");
-                    const isWorkNext = idx === firstActiveIdx && !isWaiting;
-                    const higherPriorityActive = activeCases.slice(0, idx).some(x => x.status !== "Waiting for Customer");
-                    const isLowerPriority = !isWorkNext && !isWaiting && higherPriorityActive;
-                    const higherActiveCount = activeCases.slice(0, idx).filter(x => x.status !== "Waiting for Customer").length;
-                    const highPriorityCount = activeCases.filter(x => (x.level === "E0" || x.level === "E1") && x.status !== "Waiting for Customer").length;
-                    const isLowerThanE1 = ["E2", "E3", "E4"].includes(c.level);
-                    const shouldEndorse = isLowerPriority && (higherActiveCount >= 2 || (isLowerThanE1 && highPriorityCount >= 2));
-                    const timers = followUpTimers[c.id] || {};
-                    const script = `Hi @RMT-Manager @RMT-Lead 👋\n\nRequesting approval to endorse the following case:\n\n• *Case:* ${c.label}\n• *Priority Level:* ${c.level}\n• *SLA:* ${lv.sla} hrs from ticket creation\n• *Reason for Endorsement:* Unable to begin investigation on time — the team has reached the maximum of 2 active E0/E1 cases for the day (${activeCases.filter(x => (x.level === "E0" || x.level === "E1") && x.status !== "Waiting for Customer").map(x => `${x.level} – ${x.label}`).join(", ")}). Lower-priority cases must be endorsed per operating guidelines.\n\nRequesting permission to endorse to RQC/AQC. I will continue to own the loop and ensure proper closure.\n\nThank you! 🙏`;
-
-                    return (
-                      <div key={c.id} style={{ border: `1.5px solid ${isWaiting ? "#E2E8F0" : isWorkNext ? lv.border : shouldEndorse ? "#F87171" : "#E2E8F0"}`, background: isWaiting ? "#F8FAFC" : isWorkNext ? lv.bg : shouldEndorse ? "#FEF2F2" : "#FAFAFA", borderRadius: 10, padding: "12px 14px", marginBottom: 10, opacity: isWaiting ? 0.75 : 1 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                          <div style={{ background: isWaiting ? "#94A3B8" : lv.color, color: "#fff", borderRadius: 6, padding: "3px 10px", fontWeight: 800, fontSize: 13, flexShrink: 0 }}>{c.level}</div>
-                          {isWorkNext && <span style={{ background: "#DCFCE7", color: "#166534", fontSize: 11, fontWeight: 700, borderRadius: 4, padding: "2px 7px" }}>▶ START WORKING ON THIS NOW</span>}
-                          {isWaiting && <span style={{ background: "#F1F5F9", color: "#64748B", fontSize: 11, fontWeight: 700, borderRadius: 4, padding: "2px 7px" }}>🕐 FOLLOW UP LATER</span>}
-                          {isLowerPriority && !shouldEndorse && <span style={{ background: "#FEF3C7", color: "#92400E", fontSize: 11, fontWeight: 700, borderRadius: 4, padding: "2px 7px" }}>⏳ STAND BY</span>}
-                          {shouldEndorse && <span style={{ background: "#FEE2E2", color: "#991B1B", fontSize: 11, fontWeight: 700, borderRadius: 4, padding: "2px 7px" }}>🚨 CONSIDER ENDORSING</span>}
-                          <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: isWaiting ? "#94A3B8" : "#1E293B" }}>{c.label}</span>
-                          <select value={c.status} onChange={e => updateCaseStatus(c.id, e.target.value)} style={{ border: "1px solid #E2E8F0", borderRadius: 6, padding: "4px 8px", fontSize: 12, background: "#fff" }}>
-                            {STATUSES.map(s => <option key={s}>{s}</option>)}
-                          </select>
-                          <button onClick={() => { setSelectedLevel(c.level); setView("guide"); }} style={{ background: isWaiting ? "#94A3B8" : lv.color, color: "#fff", border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Guide →</button>
-                          <button onClick={() => removeCase(c.id)} style={{ background: "none", border: "none", color: "#94A3B8", fontSize: 16, cursor: "pointer", padding: "0 4px" }}>✕</button>
-                        </div>
-
-                        {/* ─── FOLLOW-UP TIMER CONTROLS ─── */}
-                        <div style={{ marginTop: 10, background: "#F8FAFC", borderRadius: 8, padding: "10px 12px", border: "1px solid #E2E8F0" }}>
-                          <div style={{ fontSize: 11, fontWeight: 800, color: "#475569", marginBottom: 8 }}>⏰ Follow-Up Reminders</div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                            {[{ which: "followup1", label: "1st Follow-Up", activeColor: "#166534", activeBg: "#DCFCE7", activeBorder: "#22C55E" },
-                              { which: "followup2", label: "2nd Follow-Up", activeColor: "#991B1B", activeBg: "#FEF2F2", activeBorder: "#DC2626" }].map(({ which, label, activeColor, activeBg, activeBorder }) => {
-                              const fireAt = timers[`${which}FireAt`];
-                              const timeStr = timers[`${which}TimeStr`] || "";
-                              const fired = timers[`${which}Fired`];
-                              return (
-                                <div key={which} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                                  <span style={{ fontSize: 11, fontWeight: 700, color: "#374151", minWidth: 90 }}>{label}:</span>
-                                  <input type="time" value={timeStr}
-                                    onChange={e => setFollowUpTimers(prev => ({ ...prev, [c.id]: { ...prev[c.id], [`${which}TimeStr`]: e.target.value, [`${which}Fired`]: false } }))}
-                                    style={{ border: "1px solid #E2E8F0", borderRadius: 6, padding: "3px 8px", fontSize: 12, background: "#fff", cursor: "pointer" }} />
-                                  <button onClick={() => setFollowUpTime(c.id, which, timers[`${which}TimeStr`])}
-                                    disabled={!timers[`${which}TimeStr`]}
-                                    style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 6, border: `1px solid ${fireAt ? activeBorder : "#E2E8F0"}`, background: fireAt ? activeBg : "#fff", color: fireAt ? activeColor : "#64748B", cursor: timers[`${which}TimeStr`] ? "pointer" : "not-allowed", opacity: timers[`${which}TimeStr`] ? 1 : 0.5 }}>
-                                    {fired ? "✓ Fired" : fireAt ? `⏱ Set for ${new Date(fireAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}` : "▶ Set"}
-                                  </button>
-                                  {fireAt && (
-                                    <button onClick={() => clearFollowUpTimer(c.id, which)}
-                                      style={{ fontSize: 11, padding: "4px 8px", borderRadius: 6, border: "1px solid #FECACA", background: "#FEF2F2", color: "#DC2626", cursor: "pointer", fontWeight: 700 }}>✕ Off</button>
-                                  )}
-
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        {isLowerPriority && !shouldEndorse && LOWER_ACTIONS[c.level] && (
-                          <div style={{ marginTop: 10 }}>
-                            <button onClick={() => setShowLowerGuide(p => ({ ...p, [c.id]: !p[c.id] }))} style={{ background: "none", border: "1px solid #FDE68A", borderRadius: 6, padding: "4px 12px", fontSize: 11, fontWeight: 700, color: "#92400E", cursor: "pointer" }}>
-                              {showLowerGuide[c.id] ? "▲ Hide" : "▼ What should I do while I wait?"}
-                            </button>
-                            {showLowerGuide[c.id] && (
-                              <div style={{ marginTop: 8, background: "#FEFCE8", border: "1px solid #FDE68A", borderRadius: 8, padding: "12px 14px" }}>
-                                <p style={{ margin: "0 0 8px", fontSize: 12, fontWeight: 700, color: "#92400E" }}>While waiting to work on this {c.level}:</p>
-                                {LOWER_ACTIONS[c.level].map((a, i) => (
-                                  <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-                                    <span style={{ background: "#F59E0B", color: "#fff", borderRadius: "50%", width: 18, height: 18, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, flexShrink: 0, marginTop: 1 }}>{i + 1}</span>
-                                    <span style={{ fontSize: 12, color: "#374151", lineHeight: 1.6 }}>{a}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {shouldEndorse && (
-                          <div style={{ marginTop: 10 }}>
-                            <button onClick={() => setShowEndorseGuide(p => ({ ...p, [c.id]: !p[c.id] }))} style={{ background: "none", border: "1px solid #FECACA", borderRadius: 6, padding: "4px 12px", fontSize: 11, fontWeight: 700, color: "#991B1B", cursor: "pointer" }}>
-                              {showEndorseGuide[c.id] ? "▲ Hide" : "▼ Should I endorse this case?"}
-                            </button>
-                            {showEndorseGuide[c.id] && (
-                              <div style={{ marginTop: 8, background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, padding: "12px 14px" }}>
-                                <p style={{ margin: "0 0 10px", fontSize: 12, fontWeight: 700, color: "#991B1B" }}>⚠️ You have 2+ higher-priority cases ahead. Here's what to do:</p>
-                                {["Inform your RMT Lead immediately — explain your current queue and that this case cannot be started on time.", "Notify the case originator via Intercom: acknowledge the delay and provide a realistic ETA.", "If this is the 2nd time the review time has been moved → endorse to RQC or AQC now.", "Even after endorsing, closing the loop remains RMT's responsibility.", "Document the endorsement reason in the Intercom ticket before handing off."].map((a, i) => (
-                                  <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-                                    <span style={{ background: "#DC2626", color: "#fff", borderRadius: "50%", width: 18, height: 18, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, flexShrink: 0, marginTop: 1 }}>{i + 1}</span>
-                                    <span style={{ fontSize: 12, color: "#374151", lineHeight: 1.6 }}>{a}</span>
-                                  </div>
-                                ))}
-                                <div style={{ marginTop: 14, background: "#fff", border: "1.5px solid #FECACA", borderRadius: 8, padding: "12px 14px" }}>
-                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                                    <span style={{ fontSize: 12, fontWeight: 800, color: "#991B1B" }}>💬 Slack Script — Post in #RMT Channel</span>
-                                    <button onClick={() => navigator.clipboard.writeText(script)} style={{ background: "#DC2626", color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Copy</button>
-                                  </div>
-                                  <pre style={{ margin: 0, fontSize: 12, color: "#374151", whiteSpace: "pre-wrap", lineHeight: 1.7, background: "#FEF2F2", borderRadius: 6, padding: "10px 12px" }}>{script}</pre>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {endorsedCases.length > 0 && (
-                  <div style={{ background: "#fff", borderRadius: 14, padding: "20px", marginBottom: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", border: "1.5px solid #FECACA" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                      <div>
-                        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: "#991B1B" }}>👁️ Endorsed — Monitoring</h2>
-                        <p style={{ margin: "2px 0 0", fontSize: 12, color: "#64748B" }}>{endorsedCases.length} case{endorsedCases.length > 1 ? "s" : ""} endorsed · RMT still owns the loop</p>
-                      </div>
-                      <button onClick={() => setAndSaveEndorsed([])} style={{ background: "none", border: "1px solid #E2E8F0", borderRadius: 8, padding: "5px 12px", fontSize: 12, color: "#94A3B8", cursor: "pointer", fontWeight: 600 }}>Clear</button>
-                    </div>
-                    <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, padding: "10px 14px", marginBottom: 12 }}>
-                      <p style={{ margin: 0, fontSize: 12, color: "#991B1B", fontWeight: 600 }}>⚠️ Reminder: Endorsed cases are handled by RQC/AQC but closing the loop is still RMT's responsibility.</p>
-                    </div>
-                    {endorsedCases.map((c, idx) => {
-                      const lv = E_LEVELS[c.level];
-                      return (
-                        <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: idx < endorsedCases.length - 1 ? "1px solid #F1F5F9" : "none", flexWrap: "wrap" }}>
-                          <span style={{ background: lv.bg, color: lv.color, border: `1px solid ${lv.border}`, borderRadius: 5, padding: "2px 8px", fontWeight: 800, fontSize: 12 }}>{c.level}</span>
-                          <span style={{ flex: 1, fontSize: 13, color: "#374151", fontWeight: 600 }}>{c.label}</span>
-                          <span style={{ fontSize: 11, color: "#94A3B8" }}>🕐 {c.endorsedAt}</span>
-                          <select defaultValue="Endorsed" onChange={e => { if (e.target.value === "Resolved") resolveEndorsed(c.id); }} style={{ border: "1px solid #FECACA", borderRadius: 6, padding: "4px 8px", fontSize: 12, background: "#FEF2F2", color: "#991B1B", fontWeight: 700, cursor: "pointer" }}>
-                            <option value="Endorsed">Endorsed</option>
-                            <option value="Resolved">Resolved</option>
-                          </select>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {resolvedCases.length > 0 && (
-                  <div style={{ background: "#fff", borderRadius: 14, padding: "20px", marginBottom: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", border: "1px solid #E2E8F0" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                      <div>
-                        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: "#0F172A" }}>✅ Resolved Cases Log</h2>
-                        <p style={{ margin: "2px 0 0", fontSize: 12, color: "#64748B" }}>{resolvedCases.length} case{resolvedCases.length > 1 ? "s" : ""} resolved</p>
-                      </div>
-                      <button onClick={() => setAndSaveResolved([])} style={{ background: "none", border: "1px solid #E2E8F0", borderRadius: 8, padding: "5px 12px", fontSize: 12, color: "#94A3B8", cursor: "pointer", fontWeight: 600 }}>Clear Log</button>
-                    </div>
-                    {resolvedCases.map((c, idx) => {
-                      const lv = E_LEVELS[c.level];
-                      return (
-                        <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: idx < resolvedCases.length - 1 ? "1px solid #F1F5F9" : "none", flexWrap: "wrap" }}>
-                          <span style={{ background: lv.bg, color: lv.color, border: `1px solid ${lv.border}`, borderRadius: 5, padding: "2px 8px", fontWeight: 800, fontSize: 12 }}>{c.level}</span>
-                          <span style={{ flex: 1, fontSize: 13, color: "#374151", fontWeight: 600 }}>{c.label}</span>
-                          <span style={{ fontSize: 11, color: "#94A3B8" }}>🕐 {c.resolvedAt}</span>
-                          <span style={{ background: "#DCFCE7", color: "#166534", fontSize: 11, fontWeight: 700, borderRadius: 4, padding: "2px 7px" }}>Resolved</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+        {/* TRIAGE */}
+        {view==="triage"&&(
+          <div>
+            <div style={{background:"#fff",borderRadius:14,padding:"20px",marginBottom:16,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",border:"1px solid #E2E8F0"}}>
+              <h2 style={{margin:"0 0 4px",fontSize:16,fontWeight:800,color:"#0F172A"}}>📋 Active Case Queue</h2>
+              <p style={{margin:"0 0 16px",fontSize:12,color:"#64748B"}}>Cases are auto-sorted by priority (E0 first). Handle top-of-queue first — never FIFO.</p>
+              <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+                <select value={newCase.level} onChange={e=>setNewCase(p=>({...p,level:e.target.value}))} style={{border:"1px solid #E2E8F0",borderRadius:8,padding:"8px 10px",fontSize:13,fontWeight:700,color:E_LEVELS[newCase.level].color,background:E_LEVELS[newCase.level].bg,cursor:"pointer"}}>{Object.keys(E_LEVELS).map(l=><option key={l} value={l}>{l}</option>)}</select>
+                <input value={newCase.caseNumber} onChange={e=>setNewCase(p=>({...p,caseNumber:e.target.value}))} placeholder="Intercom Case #" onKeyDown={e=>e.key==="Enter"&&addCase()} style={{flex:1,border:"1px solid #E2E8F0",borderRadius:8,padding:"8px 12px",fontSize:13,minWidth:120}}/>
+                <input value={newCase.restaurantId} onChange={e=>setNewCase(p=>({...p,restaurantId:e.target.value}))} placeholder="Restaurant ID" onKeyDown={e=>e.key==="Enter"&&addCase()} style={{flex:1,border:"1px solid #E2E8F0",borderRadius:8,padding:"8px 12px",fontSize:13,minWidth:120}}/>
+                <button onClick={()=>addCase()} style={{background:"#1E3A5F",color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontSize:13,fontWeight:700,cursor:"pointer"}}>+ Add</button>
               </div>
-            )}
-
-            {/* ─── RESOLUTION GUIDE ─── */}
-            {view === "guide" && (
-              <div>
-                <div style={{ background: "#fff", borderRadius: 14, padding: "18px 20px", marginBottom: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", border: "1px solid #E2E8F0" }}>
-                  <p style={{ margin: "0 0 10px", fontSize: 13, fontWeight: 700, color: "#374151" }}>Select Escalation Level:</p>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {Object.keys(E_LEVELS).map(l => { const lv = E_LEVELS[l]; const active = selectedLevel === l; return <button key={l} onClick={() => { setSelectedLevel(l); setCurrentStatus("Submitted"); }} style={{ background: active ? lv.color : lv.bg, color: active ? "#fff" : lv.color, border: `2px solid ${lv.border}`, borderRadius: 8, padding: "8px 18px", fontWeight: 800, fontSize: 14, cursor: "pointer" }}>{l}</button>; })}
-                  </div>
-                </div>
-                {selectedLevel ? (
-                  <>
-                    <div style={{ background: el.color, borderRadius: 14, padding: "18px 22px", marginBottom: 16, color: "#fff" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-                        <div>
-                          <div style={{ fontSize: 22, fontWeight: 900 }}>{selectedLevel} Escalation</div>
-                          <div style={{ fontSize: 13, opacity: 0.85, marginTop: 3 }}>SLA: {el.sla} hrs from ticket creation · Office hours: 10:30 AM – 12:00 AM EST</div>
-                        </div>
-                        <div style={{ textAlign: "right" }}>
-                          <div style={{ fontSize: 26, fontWeight: 900 }}>{pct}%</div>
-                          <div style={{ fontSize: 12, opacity: 0.8 }}>{doneCount}/{steps.length} steps</div>
-                        </div>
-                      </div>
-                      <div style={{ marginTop: 12, background: "rgba(255,255,255,0.2)", borderRadius: 99, height: 7 }}>
-                        <div style={{ background: "#fff", height: 7, borderRadius: 99, width: `${pct}%`, transition: "width .4s" }} />
-                      </div>
-                      <div style={{ marginTop: 14, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        {STATUSES.map(s => <button key={s} onClick={() => setCurrentStatus(s)} style={{ background: currentStatus === s ? "#fff" : "rgba(255,255,255,0.15)", color: currentStatus === s ? el.color : "#fff", border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{currentStatus === s ? "● " : ""}{s}</button>)}
-                      </div>
+              {activeCases.length===0&&<div style={{textAlign:"center",padding:"30px 0",color:"#94A3B8",fontSize:13}}>No active cases. Add one above or use the E-Level Tagger tab.</div>}
+              {activeCases.map((c,idx)=>{
+                const lv=E_LEVELS[c.level];
+                const isWaiting=c.status==="Waiting for Customer";
+                const firstActiveIdx=activeCases.findIndex(x=>x.status!=="Waiting for Customer");
+                const isWorkNext=idx===firstActiveIdx&&!isWaiting;
+                const higherPriorityActive=activeCases.slice(0,idx).some(x=>x.status!=="Waiting for Customer");
+                const isLowerPriority=!isWorkNext&&!isWaiting&&higherPriorityActive;
+                const higherActiveCount=activeCases.slice(0,idx).filter(x=>x.status!=="Waiting for Customer").length;
+                const highPriorityCount=activeCases.filter(x=>(x.level==="E0"||x.level==="E1")&&x.status!=="Waiting for Customer").length;
+                const isLowerThanE1=["E2","E3","E4"].includes(c.level);
+                const shouldEndorse=isLowerPriority&&(higherActiveCount>=2||(isLowerThanE1&&highPriorityCount>=2));
+                const timers=followUpTimers[c.id]||{};
+                const script=`Hi @RMT-Manager @RMT-Lead 👋\n\nRequesting approval to endorse:\n\n• *Case:* ${c.label}\n• *Priority Level:* ${c.level}\n• *SLA:* ${lv.sla} hrs from ticket creation\n• *Reason:* Unable to begin investigation on time.\n\nRequesting permission to endorse to RQC/AQC. Thank you! 🙏`;
+                return(
+                  <div key={c.id} style={{border:`1.5px solid ${isWaiting?"#E2E8F0":isWorkNext?lv.border:shouldEndorse?"#F87171":"#E2E8F0"}`,background:isWaiting?"#F8FAFC":isWorkNext?lv.bg:shouldEndorse?"#FEF2F2":"#FAFAFA",borderRadius:10,padding:"12px 14px",marginBottom:10,opacity:isWaiting?0.75:1}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                      <div style={{background:isWaiting?"#94A3B8":lv.color,color:"#fff",borderRadius:6,padding:"3px 10px",fontWeight:800,fontSize:13,flexShrink:0}}>{c.level}</div>
+                      {isWorkNext&&<span style={{background:"#DCFCE7",color:"#166534",fontSize:11,fontWeight:700,borderRadius:4,padding:"2px 7px"}}>▶ START WORKING ON THIS NOW</span>}
+                      {isWaiting&&<span style={{background:"#F1F5F9",color:"#64748B",fontSize:11,fontWeight:700,borderRadius:4,padding:"2px 7px"}}>🕐 FOLLOW UP LATER</span>}
+                      {isLowerPriority&&!shouldEndorse&&<span style={{background:"#FEF3C7",color:"#92400E",fontSize:11,fontWeight:700,borderRadius:4,padding:"2px 7px"}}>⏳ STAND BY</span>}
+                      {shouldEndorse&&<span style={{background:"#FEE2E2",color:"#991B1B",fontSize:11,fontWeight:700,borderRadius:4,padding:"2px 7px"}}>🚨 CONSIDER ENDORSING</span>}
+                      <span style={{flex:1,fontSize:13,fontWeight:600,color:isWaiting?"#94A3B8":"#1E293B"}}>{c.label}</span>
+                      <select value={c.status} onChange={e=>updateCaseStatus(c.id,e.target.value)} style={{border:"1px solid #E2E8F0",borderRadius:6,padding:"4px 8px",fontSize:12,background:"#fff"}}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
+                      <button onClick={()=>{setSelectedLevel(c.level);setView("guide");}} style={{background:isWaiting?"#94A3B8":lv.color,color:"#fff",border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Guide →</button>
+                      <button onClick={()=>removeCase(c.id)} style={{background:"none",border:"none",color:"#94A3B8",fontSize:16,cursor:"pointer",padding:"0 4px"}}>✕</button>
                     </div>
-                    {steps.map((step, idx) => {
-                      const done = !!completedSteps[`${selectedLevel}-${step.id}`];
-                      const isNext = !done && steps.slice(0, idx).every(s => !!completedSteps[`${selectedLevel}-${s.id}`]);
-                      return (
-                        <div key={step.id} style={{ background: done ? "#F0FDF4" : "#fff", border: `1.5px solid ${done ? "#86EFAC" : isNext ? el.border : "#E2E8F0"}`, borderRadius: 12, padding: "14px 18px", marginBottom: 10, boxShadow: isNext ? `0 0 0 3px ${el.border}` : "none", opacity: !done && !isNext && doneCount < idx ? 0.6 : 1 }}>
-                          <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                            <div onClick={() => toggleStep(step.id)} style={{ width: 26, height: 26, borderRadius: "50%", border: `2px solid ${done ? "#22C55E" : isNext ? el.color : "#D1D5DB"}`, background: done ? "#22C55E" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, marginTop: 1 }}>
-                              {done ? <span style={{ color: "#fff", fontSize: 14, fontWeight: 900 }}>✓</span> : <span style={{ fontSize: 12, fontWeight: 800, color: isNext ? el.color : "#9CA3AF" }}>{step.id}</span>}
-                            </div>
-                            <div style={{ flex: 1 }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                                <span style={{ fontSize: 14, fontWeight: 700, color: done ? "#166534" : "#1E293B", textDecoration: done ? "line-through" : "none" }}>{step.title}</span>
-                                {isNext && <span style={{ background: el.color, color: "#fff", fontSize: 11, fontWeight: 700, borderRadius: 4, padding: "2px 7px" }}>DO THIS NOW</span>}
-                              </div>
-                              <p style={{ margin: "6px 0 0", fontSize: 13, color: done ? "#4ADE80" : "#4B5563", lineHeight: 1.65 }}>{step.desc}</p>
-                            </div>
+                    <div style={{marginTop:10,background:"#F8FAFC",borderRadius:8,padding:"10px 12px",border:"1px solid #E2E8F0"}}>
+                      <div style={{fontSize:11,fontWeight:800,color:"#475569",marginBottom:8}}>⏰ Follow-Up Reminders</div>
+                      {[{which:"followup1",label:"1st Follow-Up",activeColor:"#166534",activeBg:"#DCFCE7",activeBorder:"#22C55E"},{which:"followup2",label:"2nd Follow-Up",activeColor:"#991B1B",activeBg:"#FEF2F2",activeBorder:"#DC2626"}].map(({which,label,activeColor,activeBg,activeBorder})=>{
+                        const fireAt=timers[`${which}FireAt`];const timeStr=timers[`${which}TimeStr`]||"";const fired=timers[`${which}Fired`];
+                        return(
+                          <div key={which} style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:6}}>
+                            <span style={{fontSize:11,fontWeight:700,color:"#374151",minWidth:90}}>{label}:</span>
+                            <input type="time" value={timeStr} onChange={e=>setFollowUpTimers(prev=>({...prev,[c.id]:{...prev[c.id],[`${which}TimeStr`]:e.target.value,[`${which}Fired`]:false}}))} style={{border:"1px solid #E2E8F0",borderRadius:6,padding:"3px 8px",fontSize:12,background:"#fff",cursor:"pointer"}}/>
+                            <button onClick={()=>setFollowUpTime(c.id,which,timers[`${which}TimeStr`])} disabled={!timers[`${which}TimeStr`]} style={{fontSize:11,fontWeight:700,padding:"4px 10px",borderRadius:6,border:`1px solid ${fireAt?activeBorder:"#E2E8F0"}`,background:fireAt?activeBg:"#fff",color:fireAt?activeColor:"#64748B",cursor:timers[`${which}TimeStr`]?"pointer":"not-allowed",opacity:timers[`${which}TimeStr`]?1:0.5}}>{fired?"✓ Fired":fireAt?`⏱ Set for ${new Date(fireAt).toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit"})}`:"▶ Set"}</button>
+                            {fireAt&&<button onClick={()=>clearFollowUpTimer(c.id,which)} style={{fontSize:11,padding:"4px 8px",borderRadius:6,border:"1px solid #FECACA",background:"#FEF2F2",color:"#DC2626",cursor:"pointer",fontWeight:700}}>✕ Off</button>}
                           </div>
-                        </div>
-                      );
-                    })}
-                    {pct === 100 && (
-                      <div style={{ background: "linear-gradient(135deg, #065F46, #047857)", borderRadius: 14, padding: "20px", textAlign: "center", color: "#fff", marginTop: 8 }}>
-                        <div style={{ fontSize: 30 }}>🎉</div>
-                        <div style={{ fontWeight: 800, fontSize: 17, marginTop: 6 }}>{selectedLevel} Case Complete!</div>
-                        <button onClick={() => setView("triage")} style={{ marginTop: 12, background: "#fff", color: "#065F46", border: "none", borderRadius: 8, padding: "8px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>← Back to Triage</button>
+                        );
+                      })}
+                    </div>
+                    {isLowerPriority&&!shouldEndorse&&LOWER_ACTIONS[c.level]&&(
+                      <div style={{marginTop:10}}>
+                        <button onClick={()=>setShowLowerGuide(p=>({...p,[c.id]:!p[c.id]}))} style={{background:"none",border:"1px solid #FDE68A",borderRadius:6,padding:"4px 12px",fontSize:11,fontWeight:700,color:"#92400E",cursor:"pointer"}}>{showLowerGuide[c.id]?"▲ Hide":"▼ What should I do while I wait?"}</button>
+                        {showLowerGuide[c.id]&&<div style={{marginTop:8,background:"#FEFCE8",border:"1px solid #FDE68A",borderRadius:8,padding:"12px 14px"}}><p style={{margin:"0 0 8px",fontSize:12,fontWeight:700,color:"#92400E"}}>While waiting to work on this {c.level}:</p>{LOWER_ACTIONS[c.level].map((a,i)=><div key={i} style={{display:"flex",gap:8,marginBottom:6}}><span style={{background:"#F59E0B",color:"#fff",borderRadius:"50%",width:18,height:18,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,flexShrink:0,marginTop:1}}>{i+1}</span><span style={{fontSize:12,color:"#374151",lineHeight:1.6}}>{a}</span></div>)}</div>}
                       </div>
                     )}
-                  </>
-                ) : <div style={{ textAlign: "center", padding: "40px", color: "#94A3B8", fontSize: 14 }}>Select an escalation level above to begin.</div>}
+                    {shouldEndorse&&(
+                      <div style={{marginTop:10}}>
+                        <button onClick={()=>setShowEndorseGuide(p=>({...p,[c.id]:!p[c.id]}))} style={{background:"none",border:"1px solid #FECACA",borderRadius:6,padding:"4px 12px",fontSize:11,fontWeight:700,color:"#991B1B",cursor:"pointer"}}>{showEndorseGuide[c.id]?"▲ Hide":"▼ Should I endorse this case?"}</button>
+                        {showEndorseGuide[c.id]&&(
+                          <div style={{marginTop:8,background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:8,padding:"12px 14px"}}>
+                            <p style={{margin:"0 0 10px",fontSize:12,fontWeight:700,color:"#991B1B"}}>⚠️ You have 2+ higher-priority cases. Here's what to do:</p>
+                            {["Inform your RMT Lead immediately — explain your current queue and that this case cannot be started on time.","Notify the case originator via Intercom: acknowledge the delay and provide a realistic ETA.","If this is the 2nd time the review time has been moved → endorse to RQC or AQC now.","Even after endorsing, closing the loop remains RMT's responsibility.","Document the endorsement reason in the Intercom ticket before handing off."].map((a,i)=><div key={i} style={{display:"flex",gap:8,marginBottom:6}}><span style={{background:"#DC2626",color:"#fff",borderRadius:"50%",width:18,height:18,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,flexShrink:0,marginTop:1}}>{i+1}</span><span style={{fontSize:12,color:"#374151",lineHeight:1.6}}>{a}</span></div>)}
+                            <div style={{marginTop:14,background:"#fff",border:"1.5px solid #FECACA",borderRadius:8,padding:"12px 14px"}}>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><span style={{fontSize:12,fontWeight:800,color:"#991B1B"}}>💬 Slack Script</span><button onClick={()=>navigator.clipboard.writeText(script)} style={{background:"#DC2626",color:"#fff",border:"none",borderRadius:6,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer"}}>Copy</button></div>
+                              <pre style={{margin:0,fontSize:12,color:"#374151",whiteSpace:"pre-wrap",lineHeight:1.7,background:"#FEF2F2",borderRadius:6,padding:"10px 12px"}}>{script}</pre>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {endorsedCases.length>0&&(
+              <div style={{background:"#fff",borderRadius:14,padding:"20px",marginBottom:16,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",border:"1.5px solid #FECACA"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><div><h2 style={{margin:0,fontSize:16,fontWeight:800,color:"#991B1B"}}>👁️ Endorsed — Monitoring</h2><p style={{margin:"2px 0 0",fontSize:12,color:"#64748B"}}>{endorsedCases.length} case{endorsedCases.length>1?"s":""} endorsed · RMT still owns the loop</p></div><button onClick={()=>setAndSaveEndorsed([])} style={{background:"none",border:"1px solid #E2E8F0",borderRadius:8,padding:"5px 12px",fontSize:12,color:"#94A3B8",cursor:"pointer",fontWeight:600}}>Clear</button></div>
+                <div style={{background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:8,padding:"10px 14px",marginBottom:12}}><p style={{margin:0,fontSize:12,color:"#991B1B",fontWeight:600}}>⚠️ Endorsed cases are handled by RQC/AQC but closing the loop is still RMT's responsibility.</p></div>
+                {endorsedCases.map((c,idx)=>{const lv=E_LEVELS[c.level];return(<div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:idx<endorsedCases.length-1?"1px solid #F1F5F9":"none",flexWrap:"wrap"}}><span style={{background:lv.bg,color:lv.color,border:`1px solid ${lv.border}`,borderRadius:5,padding:"2px 8px",fontWeight:800,fontSize:12}}>{c.level}</span><span style={{flex:1,fontSize:13,color:"#374151",fontWeight:600}}>{c.label}</span><span style={{fontSize:11,color:"#94A3B8"}}>🕐 {c.endorsedAt}</span><select defaultValue="Endorsed" onChange={e=>{if(e.target.value==="Resolved")resolveEndorsed(c.id);}} style={{border:"1px solid #FECACA",borderRadius:6,padding:"4px 8px",fontSize:12,background:"#FEF2F2",color:"#991B1B",fontWeight:700,cursor:"pointer"}}><option value="Endorsed">Endorsed</option><option value="Resolved">Resolved</option></select></div>);})}
               </div>
             )}
 
-            {/* ─── SLA REFERENCE ─── */}
-            {view === "sla" && (
-              <div style={{ background: "#fff", borderRadius: 14, padding: "20px", marginBottom: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", border: "1px solid #E2E8F0" }}>
-                <h2 style={{ margin: "0 0 14px", fontSize: 16, fontWeight: 800, color: "#0F172A" }}>⏱️ SLA & Follow-Up Reference</h2>
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                    <thead><tr style={{ background: "#F8FAFC" }}>{["Level", "SLA", "1st Follow-Up", "2nd Follow-Up", "2nd Follow-Up Channel"].map(h => <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "#374151", borderBottom: "1px solid #E2E8F0" }}>{h}</th>)}</tr></thead>
-                    <tbody>{Object.entries(E_LEVELS).map(([k, v]) => <tr key={k} style={{ borderBottom: "1px solid #F1F5F9" }}><td style={{ padding: "8px 10px" }}><span style={{ background: v.bg, color: v.color, border: `1px solid ${v.border}`, borderRadius: 5, padding: "2px 8px", fontWeight: 800 }}>{k}</span></td><td style={{ padding: "8px 10px", fontWeight: 700 }}>{v.sla} hrs</td><td style={{ padding: "8px 10px", color: "#374151" }}>{v.followUp1}</td><td style={{ padding: "8px 10px", color: "#374151" }}>{v.followUp2}</td><td style={{ padding: "8px 10px", color: "#374151" }}>Intercom → then #R-channel Slack</td></tr>)}</tbody>
-                  </table>
-                </div>
-                <button onClick={() => setShowExceptions(p => !p)} style={{ marginTop: 14, background: "none", border: "1px solid #E2E8F0", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>{showExceptions ? "▲ Hide" : "▼ Show"} SLA Exception Scenarios</button>
-                {showExceptions && <div style={{ marginTop: 12, background: "#F8FAFC", borderRadius: 10, padding: "14px" }}>{SLA_EXCEPTIONS.map((e, i) => <div key={i} style={{ display: "flex", gap: 10, marginBottom: i < SLA_EXCEPTIONS.length - 1 ? 10 : 0 }}><span style={{ color: "#F59E0B", fontWeight: 800 }}>⚠️</span><span style={{ fontSize: 12, color: "#374151", lineHeight: 1.6 }}>{e}</span></div>)}</div>}
+            {resolvedCases.length>0&&(
+              <div style={{background:"#fff",borderRadius:14,padding:"20px",marginBottom:16,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",border:"1px solid #E2E8F0"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><div><h2 style={{margin:0,fontSize:16,fontWeight:800,color:"#0F172A"}}>✅ Resolved Cases Log</h2><p style={{margin:"2px 0 0",fontSize:12,color:"#64748B"}}>{resolvedCases.length} case{resolvedCases.length>1?"s":""} resolved</p></div><button onClick={()=>setAndSaveResolved([])} style={{background:"none",border:"1px solid #E2E8F0",borderRadius:8,padding:"5px 12px",fontSize:12,color:"#94A3B8",cursor:"pointer",fontWeight:600}}>Clear Log</button></div>
+                {resolvedCases.map((c,idx)=>{const lv=E_LEVELS[c.level];return(<div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:idx<resolvedCases.length-1?"1px solid #F1F5F9":"none",flexWrap:"wrap"}}><span style={{background:lv.bg,color:lv.color,border:`1px solid ${lv.border}`,borderRadius:5,padding:"2px 8px",fontWeight:800,fontSize:12}}>{c.level}</span><span style={{flex:1,fontSize:13,color:"#374151",fontWeight:600}}>{c.label}</span><span style={{fontSize:11,color:"#94A3B8"}}>🕐 {c.resolvedAt}</span><span style={{background:"#DCFCE7",color:"#166534",fontSize:11,fontWeight:700,borderRadius:4,padding:"2px 7px"}}>Resolved</span></div>);})}
               </div>
             )}
+          </div>
+        )}
 
-            {/* ─── INTERRUPTION HANDLER ─── */}
-            {view === "interruption" && (
-              <div style={{ background: "#fff", borderRadius: 14, padding: "22px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)", border: "1px solid #E2E8F0" }}>
-                <h2 style={{ margin: "0 0 6px", fontSize: 16, fontWeight: 800, color: "#0F172A" }}>⚡ Interruption Handler</h2>
-                <p style={{ margin: "0 0 20px", fontSize: 13, color: "#64748B" }}>A higher-priority case just arrived. Select both levels to get your action plan.</p>
-                <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 20 }}>
-                  <div style={{ flex: 1, minWidth: 180 }}>
-                    <p style={{ margin: "0 0 8px", fontSize: 12, fontWeight: 700, color: "#374151" }}>I'm currently working on:</p>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{Object.keys(E_LEVELS).map(l => { const lv = E_LEVELS[l]; const active = currentWorkingLevel === l; return <button key={l} onClick={() => setCurrentWorkingLevel(l)} style={{ background: active ? lv.color : lv.bg, color: active ? "#fff" : lv.color, border: `2px solid ${lv.border}`, borderRadius: 7, padding: "6px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>{l}</button>; })}</div>
+        {/* TAGGER */}
+        {view==="tagger"&&<ELevelTagger
+          onAddToQueue={({level,caseNumber,restaurantId})=>{
+            const label=`${caseNumber?`#${caseNumber}`:""}${caseNumber&&restaurantId?" · ":""}${restaurantId?`RID: ${restaurantId}`:""}`;
+            if(!label)return;
+            setAndSaveActive(p=>[...p,{level,caseNumber,restaurantId,id:Date.now(),label,status:"Submitted"}].sort((a,b)=>E_LEVELS[a.level].priority-E_LEVELS[b.level].priority));
+          }}
+          onOpenGuide={openGuide}
+        />}
+
+        {/* RESOLUTION GUIDE */}
+        {view==="guide"&&(
+          <div>
+            <div style={{background:"#fff",borderRadius:14,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",border:"1px solid #E2E8F0"}}>
+              <p style={{margin:"0 0 10px",fontSize:13,fontWeight:700,color:"#374151"}}>Select Escalation Level:</p>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{Object.keys(E_LEVELS).map(l=>{const lv=E_LEVELS[l];const active=selectedLevel===l;return<button key={l} onClick={()=>{setSelectedLevel(l);setCurrentStatus("Submitted");}} style={{background:active?lv.color:lv.bg,color:active?"#fff":lv.color,border:`2px solid ${lv.border}`,borderRadius:8,padding:"8px 18px",fontWeight:800,fontSize:14,cursor:"pointer"}}>{l}</button>;})}</div>
+            </div>
+            {selectedLevel?(
+              <>
+                <div style={{background:el.color,borderRadius:14,padding:"18px 22px",marginBottom:16,color:"#fff"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+                    <div><div style={{fontSize:22,fontWeight:900}}>{selectedLevel} Escalation</div><div style={{fontSize:13,opacity:0.85,marginTop:3}}>SLA: {el.sla} hrs · Office hours: 10:30 AM – 12:00 AM EST</div></div>
+                    <div style={{textAlign:"right"}}><div style={{fontSize:26,fontWeight:900}}>{pct}%</div><div style={{fontSize:12,opacity:0.8}}>{doneCount}/{steps.length} steps</div></div>
                   </div>
-                  <div style={{ flex: 1, minWidth: 180 }}>
-                    <p style={{ margin: "0 0 8px", fontSize: 12, fontWeight: 700, color: "#374151" }}>New case just arrived:</p>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{Object.keys(E_LEVELS).map(l => { const lv = E_LEVELS[l]; const active = interruptLevel === l; return <button key={l} onClick={() => setInterruptLevel(l)} style={{ background: active ? lv.color : lv.bg, color: active ? "#fff" : lv.color, border: `2px solid ${lv.border}`, borderRadius: 7, padding: "6px 14px", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>{l}</button>; })}</div>
-                  </div>
+                  <div style={{marginTop:12,background:"rgba(255,255,255,0.2)",borderRadius:99,height:7}}><div style={{background:"#fff",height:7,borderRadius:99,width:`${pct}%`,transition:"width .4s"}}/></div>
+                  <div style={{marginTop:14,display:"flex",gap:6,flexWrap:"wrap"}}>{STATUSES.map(s=><button key={s} onClick={()=>setCurrentStatus(s)} style={{background:currentStatus===s?"#fff":"rgba(255,255,255,0.15)",color:currentStatus===s?el.color:"#fff",border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>{currentStatus===s?"● ":""}{s}</button>)}</div>
                 </div>
-                {currentWorkingLevel && interruptLevel ? (() => {
-                  const cur = E_LEVELS[currentWorkingLevel], intr = E_LEVELS[interruptLevel];
-                  const mustSwitch = intr.priority < cur.priority, sameLevel = intr.priority === cur.priority;
-                  return (
-                    <div style={{ background: mustSwitch ? "#FEF2F2" : sameLevel ? "#FEFCE8" : "#F0FDF4", border: `1.5px solid ${mustSwitch ? "#FECACA" : sameLevel ? "#FDE68A" : "#86EFAC"}`, borderRadius: 12, padding: "18px 20px" }}>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: mustSwitch ? "#991B1B" : sameLevel ? "#92400E" : "#166534", marginBottom: 10 }}>{mustSwitch ? "🚨 Switch Cases Immediately" : sameLevel ? "⚠️ Same Priority Level" : "✅ Continue Current Case"}</div>
-                      {mustSwitch && <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.8 }}><p style={{ margin: "0 0 10px" }}>The new <strong>{interruptLevel}</strong> takes priority over your current <strong>{currentWorkingLevel}</strong>:</p>{[`Pause your ${currentWorkingLevel} case — do not close it.`, `Add a note in the ${currentWorkingLevel} Intercom ticket that investigation is paused.`, `Notify the ${currentWorkingLevel} originator via Intercom thread with a clear ETA.`, `Immediately begin the new ${interruptLevel} case.`, `Verify the ${interruptLevel} ticket creation timestamp — SLA started there.`, `Once ${interruptLevel} is resolved, return to ${currentWorkingLevel} and resume.`].map((a, i) => <div key={i} style={{ display: "flex", gap: 10, marginBottom: 6 }}><span style={{ background: "#DC2626", color: "#fff", borderRadius: "50%", width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, flexShrink: 0 }}>{i + 1}</span><span style={{ fontSize: 13, lineHeight: 1.6 }}>{a}</span></div>)}</div>}
-                      {sameLevel && <p style={{ margin: 0, fontSize: 13, color: "#374151" }}>Both are <strong>{currentWorkingLevel}</strong> — same priority. Handle by ticket creation timestamp (earliest first). Notify the second case owner of your ETA.</p>}
-                      {!mustSwitch && !sameLevel && <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.8 }}><p style={{ margin: "0 0 8px" }}>Your current <strong>{currentWorkingLevel}</strong> has higher priority than the incoming <strong>{interruptLevel}</strong>. Continue your investigation.</p><p style={{ margin: 0 }}>Notify the <strong>{interruptLevel}</strong> originator via Intercom with a clear ETA.</p></div>}
+                {steps.map((step,idx)=>{
+                  const done=!!completedSteps[`${selectedLevel}-${step.id}`];
+                  const isNext=!done&&steps.slice(0,idx).every(s=>!!completedSteps[`${selectedLevel}-${s.id}`]);
+                  return(
+                    <div key={step.id} style={{background:done?"#F0FDF4":"#fff",border:`1.5px solid ${done?"#86EFAC":isNext?el.border:"#E2E8F0"}`,borderRadius:12,padding:"14px 18px",marginBottom:10,boxShadow:isNext?`0 0 0 3px ${el.border}`:"none",opacity:!done&&!isNext&&doneCount<idx?0.6:1}}>
+                      <div style={{display:"flex",gap:12,alignItems:"flex-start"}}>
+                        <div onClick={()=>toggleStep(step.id)} style={{width:26,height:26,borderRadius:"50%",border:`2px solid ${done?"#22C55E":isNext?el.color:"#D1D5DB"}`,background:done?"#22C55E":"#fff",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,marginTop:1}}>
+                          {done?<span style={{color:"#fff",fontSize:14,fontWeight:900}}>✓</span>:<span style={{fontSize:12,fontWeight:800,color:isNext?el.color:"#9CA3AF"}}>{step.id}</span>}
+                        </div>
+                        <div style={{flex:1}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontSize:14,fontWeight:700,color:done?"#166534":"#1E293B",textDecoration:done?"line-through":"none"}}>{step.title}</span>{isNext&&<span style={{background:el.color,color:"#fff",fontSize:11,fontWeight:700,borderRadius:4,padding:"2px 7px"}}>DO THIS NOW</span>}</div>
+                          <p style={{margin:"6px 0 0",fontSize:13,color:done?"#4ADE80":"#4B5563",lineHeight:1.65}}>{step.desc}</p>
+                        </div>
+                      </div>
                     </div>
                   );
-                })() : <div style={{ textAlign: "center", padding: "20px", color: "#94A3B8", fontSize: 13 }}>Select both levels above to get your action plan.</div>}
-              </div>
-            )}
-
-            {/* ─── USEFUL LINKS ─── */}
-            {view === "links" && (
-              <div style={{ background: "#fff", borderRadius: 14, padding: "20px", marginBottom: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", border: "1px solid #E2E8F0" }}>
-                <h2 style={{ margin: "0 0 6px", fontSize: 16, fontWeight: 800, color: "#0F172A" }}>🔗 Useful Links</h2>
-                <p style={{ margin: "0 0 20px", fontSize: 12, color: "#64748B" }}>Quick access to all investigation and audit tools.</p>
-                {[
-                  { label: "Mistake Review", icon: "🔍", desc: "Review restaurant, internal, QA, coaching, modification, missing item, and dish mistakes.", url: "https://wondersco.lightdash.cloud/projects/e03ba889-b1c8-41d0-bb71-f480de3bf1aa/tables/mistakes?create_saved_chart_version=%7B%22tableName%22%3A%22mistakes%22%2C%22metricQuery%22%3A%7B%22exploreName%22%3A%22mistakes%22%2C%22dimensions%22%3A%5B%22mistakes_mistake_report_id%22%2C%22mistakes_why_mistake_comment%22%2C%22mistakes_order_created_at_est_day%22%2C%22restaurants_unique_code%22%2C%22weekly_agent_roster_agent_pos_id%22%2C%22asr_transcript_call_transcript%22%2C%22calls_greendot_call_url%22%5D%2C%22metrics%22%3A%5B%5D%2C%22filters%22%3A%7B%22dimensions%22%3A%7B%22id%22%3A%2281f27084-1532-4a04-944d-473b9e8e2ff9%22%2C%22and%22%3A%5B%7B%22id%22%3A%22e0c6ec71-8a98-44f5-8da1-ca6bf8bfe539%22%2C%22or%22%3A%5B%7B%22id%22%3A%22779aca0d-ec75-44a2-aa58-4160ca8344cf%22%2C%22target%22%3A%7B%22fieldId%22%3A%22mistakes_is_restaurant_mistake%22%7D%2C%22operator%22%3A%22equals%22%2C%22values%22%3A%5Btrue%5D%2C%22required%22%3Afalse%7D%2C%7B%22id%22%3A%226a730552-48c6-4d12-a4d0-093a10593282%22%2C%22target%22%3A%7B%22fieldId%22%3A%22mistakes_is_internal_mistake%22%7D%2C%22operator%22%3A%22equals%22%2C%22values%22%3A%5Btrue%5D%2C%22required%22%3Afalse%7D%2C%7B%22id%22%3A%221161f4f1-c3a9-4d8a-b837-da32c0ba848f%22%2C%22target%22%3A%7B%22fieldId%22%3A%22mistakes_is_qa_mistake%22%7D%2C%22operator%22%3A%22equals%22%2C%22values%22%3A%5Btrue%5D%2C%22required%22%3Afalse%7D%2C%7B%22id%22%3A%22c2b5abcd-b914-4bab-a94c-2e6630621fb5%22%2C%22target%22%3A%7B%22fieldId%22%3A%22mistakes_is_coaching_mistake%22%7D%2C%22operator%22%3A%22equals%22%2C%22values%22%3A%5Btrue%5D%2C%22required%22%3Afalse%7D%2C%7B%22id%22%3A%22fa652bcf-128f-4082-bd6c-7117006074b1%22%2C%22target%22%3A%7B%22fieldId%22%3A%22mistakes_is_modification_mistake%22%7D%2C%22operator%22%3A%22equals%22%2C%22values%22%3A%5Btrue%5D%2C%22required%22%3Afalse%7D%2C%7B%22id%22%3A%2247bf00c6-8031-4bef-8f28-9c6678ef9181%22%2C%22target%22%3A%7B%22fieldId%22%3A%22mistakes_is_missing_item_mistake%22%7D%2C%22operator%22%3A%22equals%22%2C%22values%22%3A%5Btrue%5D%2C%22required%22%3Afalse%7D%2C%7B%22id%22%3A%22d9a6860c-e6ab-414f-8dfc-6477b09c5acc%22%2C%22target%22%3A%7B%22fieldId%22%3A%22mistakes_is_dish_mistake%22%7D%2C%22operator%22%3A%22equals%22%2C%22values%22%3A%5Btrue%5D%2C%22required%22%3Afalse%7D%5D%7D%2C%7B%22id%22%3A%22b3b82e70-2600-48fc-a061-693605f8dca6%22%2C%22target%22%3A%7B%22fieldId%22%3A%22mistakes_order_created_at_est_day%22%7D%2C%22operator%22%3A%22inBetween%22%2C%22values%22%3A%5B%222026-01-01%22%2C%222026-02-17%22%5D%2C%22required%22%3Afalse%7D%2C%7B%22id%22%3A%2200f8e261-2e11-4413-bf2a-76da0df49bdf%22%2C%22target%22%3A%7B%22fieldId%22%3A%22restaurants_unique_code%22%7D%2C%22operator%22%3A%22equals%22%2C%22values%22%3A%5B%22R88179%22%5D%2C%22required%22%3Afalse%7D%5D%7D%7D%2C%22sorts%22%3A%5B%7B%22fieldId%22%3A%22mistakes_mistake_report_id%22%2C%22descending%22%3Afalse%7D%5D%2C%22limit%22%3A500%2C%22tableCalculations%22%3A%5B%5D%2C%22additionalMetrics%22%3A%5B%5D%7D%2C%22tableConfig%22%3A%7B%22columnOrder%22%3A%5B%22mistakes_mistake_report_id%22%2C%22mistakes_why_mistake_comment%22%2C%22mistakes_order_created_at_est_day%22%2C%22restaurants_unique_code%22%2C%22weekly_agent_roster_agent_pos_id%22%2C%22asr_transcript_call_transcript%22%2C%22calls_greendot_call_url%22%5D%7D%2C%22chartConfig%22%3A%7B%22type%22%3A%22cartesian%22%2C%22config%22%3A%7B%22layout%22%3A%7B%22xField%22%3A%22mistakes_order_created_at_est_day%22%2C%22yField%22%3A%5B%22mistakes_mistake_report_id%22%5D%7D%2C%22eChartsConfig%22%3A%7B%22showAxisTicks%22%3Afalse%2C%22series%22%3A%5B%7B%22type%22%3A%22bar%22%2C%22yAxisIndex%22%3A0%2C%22encode%22%3A%7B%22xRef%22%3A%7B%22field%22%3A%22mistakes_order_created_at_est_day%22%7D%2C%22yRef%22%3A%7B%22field%22%3A%22mistakes_mistake_report_id%22%7D%7D%2C%22isFilteredOut%22%3Afalse%7D%5D%7D%7D%7D%7D&isExploreFromHere=true" },
-                  { label: "Restaurant Investigation", icon: "🏪", desc: "Deep-dive dashboard for investigating individual restaurant performance.", url: "https://wondersco.lightdash.cloud/projects/e03ba889-b1c8-41d0-bb71-f480de3bf1aa/dashboards/e3ba9c6f-32b3-4fdf-9d5a-ad0af412423c/view/tabs/efe4d447-5bdf-4251-b616-f2e9dffc4d92?filters=%7B%22dimensions%22%3A%5B%7B%22id%22%3A%224316d92a-de05-4a24-84b0-a8f2b23c2fb9%22%2C%22target%22%3A%7B%22fieldId%22%3A%22restaurants_unique_code%22%2C%22fieldName%22%3A%22unique_code%22%2C%22tableName%22%3A%22restaurants%22%7D%2C%22values%22%3A%5B%22R86316%22%5D%2C%22disabled%22%3Afalse%2C%22operator%22%3A%22equals%22%2C%22required%22%3Atrue%7D%5D%2C%22metrics%22%3A%5B%5D%2C%22tableCalculations%22%3A%5B%5D%7D" },
-                  { label: "Transcript", icon: "📝", desc: "View and search call transcripts for investigation.", url: "https://wondersco.lightdash.cloud/projects/e03ba889-b1c8-41d0-bb71-f480de3bf1aa/saved/03ee61a3-9414-41a1-9fb9-1a445c4b8e30/edit" },
-                  { label: "EHT vs AHT with Transcript", icon: "⏱️", desc: "Compare estimated vs actual handle time alongside call transcripts.", url: "https://wondersco.lightdash.cloud/projects/e03ba889-b1c8-41d0-bb71-f480de3bf1aa/saved/920e3772-e4f7-484f-bc95-675a06741b6b/edit" },
-                  { label: "RMT Audit Form", icon: "📋", desc: "Submit audit entries for RMT case reviews.", url: "https://docs.google.com/forms/d/e/1FAIpQLSdQrOx0UOpWoXHU_QNI6yexN0vC-iRUUNQ4du-pbiOXZCihXA/viewform" },
-                  { label: "Enterprise Dashboard", icon: "📊", desc: "High-level enterprise performance dashboard filtered by restaurant.", url: "https://wondersco.lightdash.cloud/projects/e03ba889-b1c8-41d0-bb71-f480de3bf1aa/dashboards/0f6a88bb-007c-446f-b619-ba446e172ae4/view?filters=%7B%22dimensions%22%3A%5B%7B%22id%22%3A%22696a66ce-bb55-4ab4-b544-fde2f7cee342%22%2C%22label%22%3A%22Restaurant+Code%22%2C%22target%22%3A%7B%22fieldId%22%3A%22restaurants_unique_code%22%2C%22fieldName%22%3A%22unique_code%22%2C%22tableName%22%3A%22restaurants%22%7D%2C%22values%22%3A%5B%22R88179%22%5D%2C%22disabled%22%3Afalse%2C%22operator%22%3A%22equals%22%7D%5D%2C%22metrics%22%3A%5B%5D%2C%22tableCalculations%22%3A%5B%5D%7D" },
-                  { label: "Training Environment (GreenDot)", icon: "🟢", desc: "Access the GreenDot training environment for practice and testing.", url: "https://greendot.apac.prod.letsdowonders.io/greendot" },
-                  { label: "GD QA Environment (GreenDot)", icon: "🔬", desc: "Access the GreenDot QA environment for quality assurance testing.", url: "https://greendot.qa.letsdowonders.io/greendot/restaurant/RRX86883" },
-                ].map((link, i) => (
-                  <a key={i} href={link.url} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", marginBottom: 10, border: "1.5px solid #E2E8F0", borderRadius: 12, textDecoration: "none", background: "#F8FAFC" }}
-                    onMouseEnter={e => e.currentTarget.style.borderColor = "#1E3A5F"}
-                    onMouseLeave={e => e.currentTarget.style.borderColor = "#E2E8F0"}>
-                    <span style={{ fontSize: 24, flexShrink: 0 }}>{link.icon}</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A", marginBottom: 2 }}>{link.label}</div>
-                      <div style={{ fontSize: 12, color: "#64748B" }}>{link.desc}</div>
-                    </div>
-                    <span style={{ fontSize: 16, color: "#94A3B8" }}>↗</span>
-                  </a>
-                ))}
-              </div>
-            )}
-
-            <p style={{ textAlign: "center", fontSize: 11, color: "#94A3B8", marginTop: 16 }}>RMT Q1 2026 Operating Memo · DRI: @Liz</p>
+                })}
+                {pct===100&&<div style={{background:"linear-gradient(135deg,#065F46,#047857)",borderRadius:14,padding:"20px",textAlign:"center",color:"#fff",marginTop:8}}><div style={{fontSize:30}}>🎉</div><div style={{fontWeight:800,fontSize:17,marginTop:6}}>{selectedLevel} Case Complete!</div><button onClick={()=>setView("triage")} style={{marginTop:12,background:"#fff",color:"#065F46",border:"none",borderRadius:8,padding:"8px 20px",fontWeight:700,fontSize:13,cursor:"pointer"}}>← Back to Triage</button></div>}
+              </>
+            ):<div style={{textAlign:"center",padding:"40px",color:"#94A3B8",fontSize:14}}>Select an escalation level above to begin.</div>}
           </div>
-        </div>
-      );
-    }
+        )}
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
-  </script>
+        {/* SLA REFERENCE */}
+        {view==="sla"&&(
+          <div style={{background:"#fff",borderRadius:14,padding:"20px",marginBottom:16,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",border:"1px solid #E2E8F0"}}>
+            <h2 style={{margin:"0 0 14px",fontSize:16,fontWeight:800,color:"#0F172A"}}>⏱️ SLA & Follow-Up Reference</h2>
+            <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr style={{background:"#F8FAFC"}}>{["Level","SLA","1st Follow-Up","2nd Follow-Up","Channel"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontWeight:700,color:"#374151",borderBottom:"1px solid #E2E8F0"}}>{h}</th>)}</tr></thead><tbody>{Object.entries(E_LEVELS).map(([k,v])=><tr key={k} style={{borderBottom:"1px solid #F1F5F9"}}><td style={{padding:"8px 10px"}}><span style={{background:v.bg,color:v.color,border:`1px solid ${v.border}`,borderRadius:5,padding:"2px 8px",fontWeight:800}}>{k}</span></td><td style={{padding:"8px 10px",fontWeight:700}}>{v.sla} hrs</td><td style={{padding:"8px 10px",color:"#374151"}}>{v.followUp1}</td><td style={{padding:"8px 10px",color:"#374151"}}>{v.followUp2}</td><td style={{padding:"8px 10px",color:"#374151"}}>Intercom → #R-channel Slack</td></tr>)}</tbody></table></div>
+            <button onClick={()=>setShowExceptions(p=>!p)} style={{marginTop:14,background:"none",border:"1px solid #E2E8F0",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:600,cursor:"pointer",color:"#475569"}}>{showExceptions?"▲ Hide":"▼ Show"} SLA Exception Scenarios</button>
+            {showExceptions&&<div style={{marginTop:12,background:"#F8FAFC",borderRadius:10,padding:"14px"}}>{SLA_EXCEPTIONS.map((e,i)=><div key={i} style={{display:"flex",gap:10,marginBottom:i<SLA_EXCEPTIONS.length-1?10:0}}><span style={{color:"#F59E0B",fontWeight:800}}>⚠️</span><span style={{fontSize:12,color:"#374151",lineHeight:1.6}}>{e}</span></div>)}</div>}
+          </div>
+        )}
+
+        {/* INTERRUPTION HANDLER */}
+        {view==="interruption"&&(
+          <div style={{background:"#fff",borderRadius:14,padding:"22px",boxShadow:"0 1px 4px rgba(0,0,0,0.06)",border:"1px solid #E2E8F0"}}>
+            <h2 style={{margin:"0 0 6px",fontSize:16,fontWeight:800,color:"#0F172A"}}>⚡ Interruption Handler</h2>
+            <p style={{margin:"0 0 20px",fontSize:13,color:"#64748B"}}>A higher-priority case just arrived. Select both levels to get your action plan.</p>
+            <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:20}}>
+              <div style={{flex:1,minWidth:180}}><p style={{margin:"0 0 8px",fontSize:12,fontWeight:700,color:"#374151"}}>I'm currently working on:</p><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{Object.keys(E_LEVELS).map(l=>{const lv=E_LEVELS[l];const active=currentWorkingLevel===l;return<button key={l} onClick={()=>setCurrentWorkingLevel(l)} style={{background:active?lv.color:lv.bg,color:active?"#fff":lv.color,border:`2px solid ${lv.border}`,borderRadius:7,padding:"6px 14px",fontWeight:800,fontSize:13,cursor:"pointer"}}>{l}</button>;})}</div></div>
+              <div style={{flex:1,minWidth:180}}><p style={{margin:"0 0 8px",fontSize:12,fontWeight:700,color:"#374151"}}>New case just arrived:</p><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{Object.keys(E_LEVELS).map(l=>{const lv=E_LEVELS[l];const active=interruptLevel===l;return<button key={l} onClick={()=>setInterruptLevel(l)} style={{background:active?lv.color:lv.bg,color:active?"#fff":lv.color,border:`2px solid ${lv.border}`,borderRadius:7,padding:"6px 14px",fontWeight:800,fontSize:13,cursor:"pointer"}}>{l}</button>;})}</div></div>
+            </div>
+            {currentWorkingLevel&&interruptLevel?(()=>{
+              const cur=E_LEVELS[currentWorkingLevel],intr=E_LEVELS[interruptLevel];
+              const mustSwitch=intr.priority<cur.priority,sameLevel=intr.priority===cur.priority;
+              return(
+                <div style={{background:mustSwitch?"#FEF2F2":sameLevel?"#FEFCE8":"#F0FDF4",border:`1.5px solid ${mustSwitch?"#FECACA":sameLevel?"#FDE68A":"#86EFAC"}`,borderRadius:12,padding:"18px 20px"}}>
+                  <div style={{fontSize:16,fontWeight:800,color:mustSwitch?"#991B1B":sameLevel?"#92400E":"#166534",marginBottom:10}}>{mustSwitch?"🚨 Switch Cases Immediately":sameLevel?"⚠️ Same Priority Level":"✅ Continue Current Case"}</div>
+                  {mustSwitch&&<div style={{fontSize:13,color:"#374151",lineHeight:1.8}}><p style={{margin:"0 0 10px"}}>The new <strong>{interruptLevel}</strong> takes priority over your current <strong>{currentWorkingLevel}</strong>:</p>{[`Pause your ${currentWorkingLevel} case — do not close it.`,`Add a note in the ${currentWorkingLevel} Intercom ticket that investigation is paused.`,`Notify the ${currentWorkingLevel} originator via Intercom thread with a clear ETA.`,`Immediately begin the new ${interruptLevel} case.`,`Verify the ${interruptLevel} ticket creation timestamp — SLA started there.`,`Once ${interruptLevel} is resolved, return to ${currentWorkingLevel} and resume.`].map((a,i)=><div key={i} style={{display:"flex",gap:10,marginBottom:6}}><span style={{background:"#DC2626",color:"#fff",borderRadius:"50%",width:22,height:22,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,flexShrink:0}}>{i+1}</span><span style={{fontSize:13,lineHeight:1.6}}>{a}</span></div>)}</div>}
+                  {sameLevel&&<p style={{margin:0,fontSize:13,color:"#374151"}}>Both are <strong>{currentWorkingLevel}</strong> — same priority. Handle by ticket creation timestamp (earliest first). Notify the second case owner of your ETA.</p>}
+                  {!mustSwitch&&!sameLevel&&<div style={{fontSize:13,color:"#374151",lineHeight:1.8}}><p style={{margin:"0 0 8px"}}>Your current <strong>{currentWorkingLevel}</strong> has higher priority than the incoming <strong>{interruptLevel}</strong>. Continue your investigation.</p><p style={{margin:0}}>Notify the <strong>{interruptLevel}</strong> originator via Intercom with a clear ETA.</p></div>}
+                </div>
+              );
+            })():<div style={{textAlign:"center",padding:"20px",color:"#94A3B8",fontSize:13}}>Select both levels above to get your action plan.</div>}
+          </div>
+        )}
+
+        {/* USEFUL LINKS */}
+        {view==="links"&&(
+          <div style={{background:"#fff",borderRadius:14,padding:"20px",marginBottom:16,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",border:"1px solid #E2E8F0"}}>
+            <h2 style={{margin:"0 0 6px",fontSize:16,fontWeight:800,color:"#0F172A"}}>🔗 Useful Links</h2>
+            <p style={{margin:"0 0 20px",fontSize:12,color:"#64748B"}}>Quick access to all investigation and audit tools.</p>
+            {USEFUL_LINKS.map((link,i)=>(
+              <a key={i} href={link.url} target="_blank" rel="noopener noreferrer" style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",marginBottom:10,border:"1.5px solid #E2E8F0",borderRadius:12,textDecoration:"none",background:"#F8FAFC"}} onMouseEnter={e=>e.currentTarget.style.borderColor="#1E3A5F"} onMouseLeave={e=>e.currentTarget.style.borderColor="#E2E8F0"}>
+                <span style={{fontSize:24,flexShrink:0}}>{link.icon}</span>
+                <div style={{flex:1}}><div style={{fontSize:14,fontWeight:700,color:"#0F172A",marginBottom:2}}>{link.label}</div><div style={{fontSize:12,color:"#64748B"}}>{link.desc}</div></div>
+                <span style={{fontSize:16,color:"#94A3B8"}}>↗</span>
+              </a>
+            ))}
+          </div>
+        )}
+
+        <p style={{textAlign:"center",fontSize:11,color:"#94A3B8",marginTop:16}}>RMT Q1 2026 Operating Memo · DRI: @Liz · 💾 Data saved per user</p>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
 </body>
 </html>
