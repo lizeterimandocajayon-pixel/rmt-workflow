@@ -282,55 +282,49 @@ function LoginScreen({onLogin}){
   );
 }
 
-function App(){
-  const [rmtName,setRmtName]=useState(null);
-  const [view,setView]=useState("triage");
-  const [selectedLevel,setSelectedLevel]=useState(null);
-  const [completedSteps,setCompletedSteps]=useState({});
-  const [currentStatus,setCurrentStatus]=useState("Submitted");
-  const [activeCases,setActiveCases]=useState([]);
-  const [resolvedCases,setResolvedCases]=useState([]);
-  const [endorsedCases,setEndorsedCases]=useState([]);
-  const [newCase,setNewCase]=useState({level:"E0",caseNumber:"",restaurantId:""});
-  const [interruptLevel,setInterruptLevel]=useState(null);
-  const [currentWorkingLevel,setCurrentWorkingLevel]=useState(null);
-  const [showExceptions,setShowExceptions]=useState(false);
-  const [showLowerGuide,setShowLowerGuide]=useState({});
-  const [showEndorseGuide,setShowEndorseGuide]=useState({});
-  const [saveStatus,setSaveStatus]=useState(null); // null | "saving" | "saved" | "error"
-  const [notifications,setNotifications]=useState([]);
-  const [followUpTimers,setFollowUpTimers]=useState({});
-  const notifIdRef=useRef(0);
-  const saveTimeoutRef=useRef(null);
-
-  const steps=selectedLevel?STEPS[selectedLevel]:[];
-  const doneCount=steps.filter(s=>!!completedSteps[`${selectedLevel}-${s.id}`]).length;
-  const pct=steps.length?Math.round((doneCount/steps.length)*100):0;
-  const el=selectedLevel?E_LEVELS[selectedLevel]:null;
-  const ts=()=>new Date().toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
-
-  // ── Save all state to persistent storage ───────────────────────────────────
-  const save = useCallback(async (ac, rc, ec, cs) => {
+const save = useCallback(async (ac, rc, ec, cs, ae) => {
     if (!rmtName) return;
     setSaveStatus("saving");
-    const payload = { activeCases: ac, resolvedCases: rc, endorsedCases: ec, completedSteps: cs };
-    const ok = await persistSave(rmtName, payload);
-    setSaveStatus(ok ? "saved" : "error");
+    try {
+      // Package up all the app's data
+      const payload = { activeCases: ac, resolvedCases: rc, endorsedCases: ec, completedSteps: cs, auditEntries: ae };
+      
+      // Send it directly to Supabase
+      const { error } = await supabaseClient
+        .from('rmt_state')
+        .upsert({ username: rmtName, data: payload });
+        
+      if (error) throw error;
+      setSaveStatus("saved");
+    } catch(e) {
+      console.error("Save error:", e);
+      setSaveStatus("error");
+    }
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     saveTimeoutRef.current = setTimeout(() => setSaveStatus(null), 2500);
-    // Background sync to Google Sheets
-    sheetSync(rmtName, payload);
   }, [rmtName]);
 
   // ── Load state on login ────────────────────────────────────────────────────
   const handleLogin = useCallback(async name => {
     if (Notification.permission === "default") Notification.requestPermission();
-    const data = await persistLoad(name);
-    if (data) {
-      if (data.activeCases)   setActiveCases(data.activeCases);
-      if (data.resolvedCases) setResolvedCases(data.resolvedCases);
-      if (data.endorsedCases) setEndorsedCases(data.endorsedCases);
-      if (data.completedSteps) setCompletedSteps(data.completedSteps);
+    try {
+      // Pull the user's data from Supabase
+      const { data, error } = await supabaseClient
+        .from('rmt_state')
+        .select('data')
+        .eq('username', name)
+        .single();
+        
+      if (data && data.data) {
+        const d = data.data;
+        if (d.activeCases) setActiveCases(d.activeCases);
+        if (d.resolvedCases) setResolvedCases(d.resolvedCases);
+        if (d.endorsedCases) setEndorsedCases(d.endorsedCases);
+        if (d.completedSteps) setCompletedSteps(d.completedSteps);
+        if (d.auditEntries) setAuditEntries(d.auditEntries);
+      }
+    } catch(e) {
+      console.error("Load error:", e);
     }
     setRmtName(name);
   }, []);
